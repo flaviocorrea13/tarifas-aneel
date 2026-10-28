@@ -1,0 +1,37 @@
+# Configuração de ferramentas de desenvolvimento do Tarifas ANEEL.
+#
+# Ruff segue o estilo do Home Assistant: linha de 88 colunas, imports
+# ordenados por seção (stdlib -> third-party -> custom_components) e
+# alvo Python 3.12 (mínimo suportado pelo HA 2024.10, ver hacs.json).
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+# O en-dash (–) e o em-dash (—) aparecem em valores REAIS da API da ANEEL
+# (ex.: "Iluminação pública – B4a"); substituí-los quebraria os filtros.
+allowed-confusables = ["–", "—"]
+select = [
+    "E501", # line-too-long
+    "E7",   # comparações/declarações problemáticas
+    "E9",   # erros de execução (nome indefinido etc.)
+    "F",    # pyflakes (imports não usados, variáveis não usadas)
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "DTZ",  # datetime sem timezone
+    "T20",  # print/prohibited
+    "W",    # pycodestyle warnings
+    "RUF",  # regras próprias do ruff
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+combine-as-imports = true
+known-first-party = ["custom_components"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

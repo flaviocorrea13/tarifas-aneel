@@ -1,0 +1,16 @@
+# Arquivos gerados por ferramentas de desenvolvimento.
+__pycache__/
+*.py[cod]
+
+# Caches de testes e lint.
+.pytest_cache/
+.ruff_cache/
+.tox/
+
+# Ambientes virtuais.
+.venv/
+venv/
+
+# Arquivos do sistema.
+.DS_Store
+Thumbs.db

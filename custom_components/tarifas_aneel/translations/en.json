@@ -1,0 +1,107 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tarifas ANEEL",
+        "description": "Choose the tariff slice (utility, sub-group, class, sub-class, tariff modality and detail). The slice is validated against the public ANEEL open-data portal before the integration is created.",
+        "data": {
+          "distribuidora": "Utility (distribuidora)",
+          "subgrupo": "Sub-group",
+          "classe": "Class",
+          "subclasse": "Sub-class",
+          "modalidade": "Tariff modality",
+          "detalhe": "Detail (SCEE)"
+        },
+        "data_description": {
+          "distribuidora": "Electricity utility (sigla as used by ANEEL).",
+          "subgrupo": "Tariff sub-group from your bill (e.g. B1 residential).",
+          "classe": "Consumer class of the premises.",
+          "subclasse": "Consumer sub-class of the premises.",
+          "modalidade": "Tariff modality (Conventional or White — group B).",
+          "detalhe": "Pick SCEE only for the reduced energy tariff with distributed generation; the default is \"Not applicable\"."
+        }
+      }
+    },
+    "error": {
+      "sem_dados": "No tariffs published for this slice at ANEEL. Check the sub-group, class, sub-class and modality (or the SCEE detail).",
+      "cannot_connect": "Could not reach the ANEEL servers. Check the connection and try again."
+    },
+    "abort": {
+      "already_configured": "This tariff slice is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Slice options",
+        "data": {
+          "icms_percentual": "ICMS (%)",
+          "pis_percentual": "PIS (%)",
+          "cofins_percentual": "COFINS (%)",
+          "cip_cosip_mensal": "CIP/COSIP (R$/month)",
+          "update_interval_horas": "Update interval (h)",
+          "consumo_entity_id": "Energy consumption sensor (kWh) — optional",
+          "ponta_inicio": "Peak start",
+          "ponta_fim": "Peak end"
+        },
+        "data_description": {
+          "icms_percentual": "ICMS rate from your bill, in % (e.g. 18). Applied as the 'inclusive' gross-up.",
+          "pis_percentual": "PIS rate, in % (e.g. 0.65).",
+          "cofins_percentual": "COFINS rate, in % (e.g. 3.64).",
+          "cip_cosip_mensal": "Monthly CIP/COSIP fixed cost in R$ (informational; not included in R$/kWh).",
+          "update_interval_horas": "How often data is fetched from ANEEL (minimum 6 h).",
+          "consumo_entity_id": "kWh consumption sensor for automations (optional).",
+          "ponta_inicio": "Start of the peak period for your utility (White modality only).",
+          "ponta_fim": "End of the peak period (White modality only)."
+        }
+      }
+    },
+    "error": {
+      "soma_aliquotas": "ICMS + PIS + COFINS must be below 100%."
+    }
+  },
+  "issues": {
+    "dados_apenas_cache": {
+      "title": "Stale tariff data ({distribuidora})",
+      "description": "The Tarifas ANEEL integration has not been able to update the {distribuidora} slice for {dias} days (last real update: {ultima}). The displayed values come from the local cache. Check connectivity or the ANEEL open-data portal; updates will resume automatically."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tarifa_final": {
+        "name": "Final tariff"
+      },
+      "tarifa_sem_impostos": {
+        "name": "Tariff without taxes"
+      },
+      "tarifa_tusd": {
+        "name": "TUSD"
+      },
+      "tarifa_te": {
+        "name": "TE"
+      },
+      "adicional_bandeira": {
+        "name": "Flag surcharge"
+      },
+      "bandeira_atual": {
+        "name": "Tariff flag"
+      },
+      "posto_tarifario": {
+        "name": "Time-of-use period"
+      },
+      "custo_fixo_mensal": {
+        "name": "Monthly CIP/COSIP"
+      }
+    },
+    "binary_sensor": {
+      "dados_desatualizados": {
+        "name": "Stale data"
+      }
+    },
+    "button": {
+      "atualizar_agora": {
+        "name": "Update now"
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "domain": "tarifas_aneel",
+  "name": "Tarifas ANEEL",
+  "codeowners": ["@flaviocorrea13"],
+  "config_flow": true,
+  "documentation": "https://github.com/flaviocorrea13/tarifas-aneel",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/flaviocorrea13/tarifas-aneel/issues",
+  "requirements": ["python-dateutil>=2.9.0.post0"],
+  "version": "1.0.0"
+}

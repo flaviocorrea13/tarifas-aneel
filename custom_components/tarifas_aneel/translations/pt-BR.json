@@ -1,0 +1,107 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tarifas ANEEL",
+        "description": "Escolha o recorte tarifário (distribuidora, subgrupo, classe, subclasse, modalidade e detalhe). O recorte é validado no portal de dados abertos da ANEEL antes de criar a integração.",
+        "data": {
+          "distribuidora": "Distribuidora",
+          "subgrupo": "Subgrupo",
+          "classe": "Classe",
+          "subclasse": "Subclasse",
+          "modalidade": "Modalidade tarifária",
+          "detalhe": "Detalhe (SCEE)"
+        },
+        "data_description": {
+          "distribuidora": "Concessionária de energia (sigla usada pela ANEEL).",
+          "subgrupo": "Subgrupo tarifário da fatura (ex.: B1 residencial).",
+          "classe": "Classe de consumo da unidade.",
+          "subclasse": "Subclasse de consumo da unidade.",
+          "modalidade": "Modalidade tarifária (Convencional ou Branca — grupo B).",
+          "detalhe": "Escolha SCEE apenas para a TE reduzida com geração distribuída; o padrão é \"Não se aplica\"."
+        }
+      }
+    },
+    "error": {
+      "sem_dados": "Nenhuma tarifa publicada para esse recorte na ANEEL. Confira subgrupo, classe, subclasse e modalidade (ou o detalhe SCEE).",
+      "cannot_connect": "Não foi possível consultar os servidores da ANEEL. Verifique a conexão e tente novamente."
+    },
+    "abort": {
+      "already_configured": "Este recorte tarifário já está configurado."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções do recorte",
+        "data": {
+          "icms_percentual": "ICMS (%)",
+          "pis_percentual": "PIS (%)",
+          "cofins_percentual": "COFINS (%)",
+          "cip_cosip_mensal": "CIP/COSIP (R$/mês)",
+          "update_interval_horas": "Intervalo de atualização (h)",
+          "consumo_entity_id": "Sensor de consumo (kWh) — opcional",
+          "ponta_inicio": "Início da ponta",
+          "ponta_fim": "Fim da ponta"
+        },
+        "data_description": {
+          "icms_percentual": "Alíquota de ICMS da sua fatura, em % (ex.: 18). Aplicada no gross-up \"por dentro\".",
+          "pis_percentual": "Alíquota de PIS, em % (ex.: 0,65).",
+          "cofins_percentual": "Alíquota de COFINS, em % (ex.: 3,64).",
+          "cip_cosip_mensal": "Custo fixo mensal de CIP/COSIP em R$ (informativo; não entra no R$/kWh).",
+          "update_interval_horas": "Frequência de atualização junto à ANEEL (mínimo 6 h).",
+          "consumo_entity_id": "Sensor de consumo em kWh para automações (opcional).",
+          "ponta_inicio": "Início do horário de ponta da sua distribuidora (só modalidade Branca).",
+          "ponta_fim": "Fim do horário de ponta (só modalidade Branca)."
+        }
+      }
+    },
+    "error": {
+      "soma_aliquotas": "A soma de ICMS + PIS + COFINS deve ser menor que 100%."
+    }
+  },
+  "issues": {
+    "dados_apenas_cache": {
+      "title": "Dados tarifários desatualizados ({distribuidora})",
+      "description": "A integração Tarifas ANEEL não consegue atualizar o recorte {distribuidora} há {dias} dias (última atualização real: {ultima}). Os valores exibidos vêm do cache local. Verifique a conexão ou o portal de dados abertos da ANEEL; a atualização retoma automaticamente."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tarifa_final": {
+        "name": "Tarifa final"
+      },
+      "tarifa_sem_impostos": {
+        "name": "Tarifa sem impostos"
+      },
+      "tarifa_tusd": {
+        "name": "TUSD"
+      },
+      "tarifa_te": {
+        "name": "TE"
+      },
+      "adicional_bandeira": {
+        "name": "Adicional de bandeira"
+      },
+      "bandeira_atual": {
+        "name": "Bandeira tarifária"
+      },
+      "posto_tarifario": {
+        "name": "Posto tarifário"
+      },
+      "custo_fixo_mensal": {
+        "name": "CIP/COSIP mensal"
+      }
+    },
+    "binary_sensor": {
+      "dados_desatualizados": {
+        "name": "Dados desatualizados"
+      }
+    },
+    "button": {
+      "atualizar_agora": {
+        "name": "Atualizar agora"
+      }
+    }
+  }
+}

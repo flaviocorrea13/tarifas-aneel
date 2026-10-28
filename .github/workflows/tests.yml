@@ -1,0 +1,19 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar Home Assistant 2024.10 (mínimo da integração) + pytest
+        run: pip install homeassistant==2024.10.0 pytest python-dateutil
+      - name: Pytest
+        run: pytest tests -q
