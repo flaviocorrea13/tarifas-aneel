@@ -12,9 +12,14 @@ recorte não gera entries duplicadas, mas uma variante SCEE continua
 possível.
 
 Fluxo de opções: alíquotas de ICMS/PIS/COFINS em % (padrão 0 — o usuário
-deve conferir os valores reais na própria fatura), CIP/COSIP em R$/mês,
-intervalo de atualização em horas (mínimo 6), entidade de consumo (kWh)
-opcional e, apenas na modalidade Branca, a janela de ponta.
+deve conferir os valores reais na própria fatura), escolha da base do
+PIS/COFINS (sem ICMS por padrão), CIP/COSIP em R$/mês, intervalo de
+atualização em horas (mínimo 6), entidades de consumo e injeção (kWh)
+opcionais e, apenas na modalidade Branca, a janela de ponta.
+
+Cada gravação do options flow registra a data da revisão das alíquotas em
+``aliquotas_revisadas_em``; o coordinator usa essa data no lembrete de
+revisão de impostos.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from custom_components.tarifas_aneel.api import (
@@ -48,6 +54,7 @@ from custom_components.tarifas_aneel.const import (
     DEFAULT_DETALHE,
     DEFAULT_ICMS,
     DEFAULT_PIS,
+    DEFAULT_PIS_COFINS_SEM_ICMS,
     DEFAULT_PONTA_FIM,
     DEFAULT_PONTA_INICIO,
     DEFAULT_SUBCLASSE,
@@ -62,11 +69,14 @@ from custom_components.tarifas_aneel.const import (
     MODALIDADE_CONVENCIONAL,
     MODALIDADES_GRUPO_B,
     NAO_SE_APLICA,
+    OPT_ALIQUOTAS_REVISADAS_EM,
     OPT_CIP_COSIP,
     OPT_COFINS,
     OPT_CONSUMO_ENTITY_ID,
     OPT_ICMS,
+    OPT_INJECAO_ENTITY_ID,
     OPT_PIS,
+    OPT_PIS_COFINS_SEM_ICMS,
     OPT_PONTA_FIM,
     OPT_PONTA_INICIO,
     OPT_UPDATE_INTERVAL,
@@ -136,6 +146,32 @@ def _seletor_numero(
             mode=selector.NumberSelectorMode.BOX,
         )
     )
+
+
+def _validar_percentuais(
+    icms_pct: float,
+    pis_pct: float,
+    cofins_pct: float,
+    pis_cofins_sem_icms: bool,
+) -> str | None:
+    """Valida os percentuais e devolve a chave de erro (ou ``None``).
+
+    As regras espelham :func:`calc.validar_aliquotas`:
+
+    * ``0 <= ICMS < 100``;
+    * ``PIS`` e ``COFINS`` não negativos;
+    * ``0 <= PIS + COFINS < 100``;
+    * na fórmula antiga, ``ICMS + PIS + COFINS < 100``.
+    """
+    if icms_pct < 0 or icms_pct >= 100:
+        return "icms_invalido"
+    if pis_pct < 0 or cofins_pct < 0:
+        return "aliquota_negativa"
+    if pis_pct + cofins_pct >= 100:
+        return "pis_cofins_invalidos"
+    if not pis_cofins_sem_icms and icms_pct + pis_pct + cofins_pct >= 100:
+        return "soma_aliquotas"
+    return None
 
 
 ESQUEMA_CONFIG: Final = vol.Schema(
@@ -277,22 +313,42 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
         """Passo único de opções."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            soma = (
-                float(user_input[OPT_ICMS])
-                + float(user_input[OPT_PIS])
-                + float(user_input[OPT_COFINS])
-            ) / 100.0
-            if soma >= 1.0:
-                # Mesma regra de calc.validar_aliquotas: gross-up impossível.
-                errors["base"] = "soma_aliquotas"
-            else:
-                _LOGGER.debug(
-                    "Opções atualizadas para a entry %s", self._entry.entry_id
+            sem_icms = bool(
+                user_input.get(
+                    OPT_PIS_COFINS_SEM_ICMS, DEFAULT_PIS_COFINS_SEM_ICMS
                 )
-                return self.async_create_entry(title="", data=user_input)
+            )
+            erro = _validar_percentuais(
+                float(user_input[OPT_ICMS]),
+                float(user_input[OPT_PIS]),
+                float(user_input[OPT_COFINS]),
+                sem_icms,
+            )
+            if erro is not None:
+                errors["base"] = erro
+            else:
+                dados = dict(user_input)
+                dados[OPT_ALIQUOTAS_REVISADAS_EM] = self._carimbo_revisao()
+                _LOGGER.debug(
+                    "Opções atualizadas para a entry %s (revisão de "
+                    "impostos: %s)",
+                    self._entry.entry_id,
+                    dados[OPT_ALIQUOTAS_REVISADAS_EM],
+                )
+                return self.async_create_entry(title="", data=dados)
         return self.async_show_form(
             step_id="init", data_schema=self._esquema(), errors=errors
         )
+
+    @staticmethod
+    def _carimbo_revisao() -> str:
+        """Data (ISO) em que as alíquotas foram salvas.
+
+        Toda gravação do options flow registra a data: salvar as opções é
+        a forma de o usuário confirmar que conferiu a conta de luz e
+        encerrar o lembrete de revisão.
+        """
+        return dt_util.now().date().isoformat()
 
     def _esquema(self) -> vol.Schema:
         """Esquema com os valores atuais como padrão.
@@ -313,6 +369,15 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
                 default=float(opcoes.get(OPT_COFINS, DEFAULT_COFINS)),
             ): _seletor_numero("%", 0.0, MAX_ALIQUOTA_PCT, 0.01),
             vol.Required(
+                OPT_PIS_COFINS_SEM_ICMS,
+                default=bool(
+                    opcoes.get(
+                        OPT_PIS_COFINS_SEM_ICMS,
+                        DEFAULT_PIS_COFINS_SEM_ICMS,
+                    )
+                ),
+            ): selector.BooleanSelector(),
+            vol.Required(
                 OPT_CIP_COSIP,
                 default=float(opcoes.get(OPT_CIP_COSIP, DEFAULT_CIP_COSIP)),
             ): _seletor_numero("R$/mês", 0.0, MAX_CIP_COSIP, 0.01),
@@ -331,6 +396,14 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
                 OPT_CONSUMO_ENTITY_ID,
                 description={
                     "suggested_value": opcoes.get(OPT_CONSUMO_ENTITY_ID)
+                },
+            ): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Optional(
+                OPT_INJECAO_ENTITY_ID,
+                description={
+                    "suggested_value": opcoes.get(OPT_INJECAO_ENTITY_ID)
                 },
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")

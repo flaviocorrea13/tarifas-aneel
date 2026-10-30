@@ -16,10 +16,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.tarifas_aneel.const import (
     ANEEL_BASE_URL,
     ATTR_ALIQUOTAS_APLICADAS,
+    ATTR_ALIQUOTAS_REVISADAS_EM,
     ATTR_DATA_COMPETENCIA,
     ATTR_DISTRIBUIDORA,
     ATTR_FONTE_DADO,
+    ATTR_IMPOSTOS_CONFIGURADOS,
     ATTR_MODALIDADE,
+    ATTR_PIS_COFINS_SEM_ICMS,
     ATTR_SUBGRUPO,
     CONF_DISTRIBUIDORA,
     CONF_MODALIDADE,
@@ -27,12 +30,15 @@ from custom_components.tarifas_aneel.const import (
     DEFAULT_COFINS,
     DEFAULT_ICMS,
     DEFAULT_PIS,
+    DEFAULT_PIS_COFINS_SEM_ICMS,
     DEVICE_MANUFACTURER,
     DISTRIBUTOR_NAMES,
     DOMAIN,
+    OPT_ALIQUOTAS_REVISADAS_EM,
     OPT_COFINS,
     OPT_ICMS,
     OPT_PIS,
+    OPT_PIS_COFINS_SEM_ICMS,
 )
 from custom_components.tarifas_aneel.coordinator import AneelTarifasCoordinator
 
@@ -107,4 +113,29 @@ class AneelBaseEntity(CoordinatorEntity[AneelTarifasCoordinator]):
             "icms": pct(OPT_ICMS, DEFAULT_ICMS),
             "pis": pct(OPT_PIS, DEFAULT_PIS),
             "cofins": pct(OPT_COFINS, DEFAULT_COFINS),
+        }
+
+    def _atributos_impostos(self) -> dict[str, Any]:
+        """Atributos de configuração e revisão dos impostos.
+
+        ``impostos_configurados`` é ``False`` quando ICMS, PIS e COFINS
+        estão todos em zero (o preço final mostrado é a tarifa sem
+        impostos). ``aliquotas_revisadas_em`` é a data (ISO) em que as
+        alíquotas foram salvas pela última vez no options flow.
+        """
+        opcoes = self._entry.options
+        aliquotas = self._aliquotas_pct()
+        return {
+            ATTR_IMPOSTOS_CONFIGURADOS: any(
+                abs(valor) > 1e-9 for valor in aliquotas.values()
+            ),
+            ATTR_ALIQUOTAS_REVISADAS_EM: opcoes.get(
+                OPT_ALIQUOTAS_REVISADAS_EM
+            ),
+            ATTR_PIS_COFINS_SEM_ICMS: bool(
+                opcoes.get(
+                    OPT_PIS_COFINS_SEM_ICMS,
+                    DEFAULT_PIS_COFINS_SEM_ICMS,
+                )
+            ),
         }

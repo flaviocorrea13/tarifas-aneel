@@ -27,7 +27,10 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_time_interval,
+)
 from homeassistant.util import dt as dt_util
 
 from custom_components.tarifas_aneel.const import (
@@ -37,6 +40,8 @@ from custom_components.tarifas_aneel.const import (
     DEFAULT_CIP_COSIP,
     MODALIDADE_BRANCA,
     OPT_CIP_COSIP,
+    OPT_CONSUMO_ENTITY_ID,
+    OPT_INJECAO_ENTITY_ID,
     UNIT_PRECO_ENERGIA,
     UNIT_REAIS,
 )
@@ -57,6 +62,9 @@ class TarifaSensor(AneelBaseEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 5
     _campo: str = ""
+    # Sensores de preço que dependem de impostos expõem os atributos de
+    # configuração/revisão (final e sem impostos).
+    _expoe_impostos: bool = False
 
     def __init__(
         self,
@@ -131,11 +139,23 @@ class TarifaSensor(AneelBaseEntity, SensorEntity):
             return None
         return getattr(calculo, self._campo)
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Atributos padrão e, se aplicável, os de impostos."""
+        dados = self._dados
+        attrs = self._atributos_padrao(
+            dados.fonte_tarifa if dados is not None else None
+        )
+        if self._expoe_impostos:
+            attrs.update(self._atributos_impostos())
+        return attrs
+
 
 class TarifaFinalSensor(TarifaSensor):
     """Preço final com impostos e bandeira (R$/kWh) — painel de Energia."""
 
     _campo = "tarifa_final"
+    _expoe_impostos = True
     _attr_icon = "mdi:cash-multiple"
 
     def __init__(
@@ -148,9 +168,7 @@ class TarifaFinalSensor(TarifaSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Atributos: fonte, posto ativo e tarifas por posto (Branca)."""
         dados = self._dados
-        attrs = self._atributos_padrao(
-            dados.fonte_tarifa if dados is not None else None
-        )
+        attrs = super().extra_state_attributes
         posto = self._posto_atual()
         if posto is not None:
             attrs[ATTR_POSTO_TARIFARIO] = posto
@@ -166,6 +184,7 @@ class TarifaSemImpostosSensor(TarifaSensor):
     """TUSD + TE, antes de impostos e bandeira (R$/kWh)."""
 
     _campo = "tarifa_sem_impostos"
+    _expoe_impostos = True
     _attr_icon = "mdi:cash"
 
     def __init__(
@@ -346,6 +365,139 @@ class CustoFixoMensalSensor(AneelBaseEntity, SensorEntity):
             return DEFAULT_CIP_COSIP
 
 
+class CustoEstimadoMesSensor(AneelBaseEntity, SensorEntity):
+    """Estimativa do custo mensal a partir do consumo informado.
+
+    ``consumo_liquido = max(consumo - injecao, 0)``; o custo é
+    ``consumo_liquido x tarifa_final + CIP/COSIP``. A entidade de consumo
+    deve ser um medidor com o consumo do mês (por exemplo, um
+    ``utility_meter`` com ciclo mensal). Sem entidade de injeção, a
+    compensação de microgeração não é considerada.
+    """
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = UNIT_REAIS
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_icon = "mdi:calculator"
+    _attr_translation_key = "custo_estimado_mes"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa a estimativa e o rastreio das entidades de origem."""
+        super().__init__(coordinator, entry, "custo_estimado_mes")
+        self._cancelar: Callable[[], None] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Reavalia quando o consumo ou a injeção mudam."""
+        await super().async_added_to_hass()
+        ids = [
+            str(valor)
+            for valor in (
+                self._entry.options.get(OPT_CONSUMO_ENTITY_ID),
+                self._entry.options.get(OPT_INJECAO_ENTITY_ID),
+            )
+            if valor
+        ]
+        if ids:
+            self._cancelar = async_track_state_change_event(
+                self.hass, ids, self._ao_mudar_origem
+            )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancela o rastreio das entidades de origem."""
+        if self._cancelar is not None:
+            self._cancelar()
+            self._cancelar = None
+
+    @callback
+    def _ao_mudar_origem(self, event: Any) -> None:
+        """Reescreve o estado quando consumo/injeção mudam."""
+        self.async_write_ha_state()
+
+    def _estado_kwh(self, chave: str) -> float | None:
+        """Lê o estado numérico (kWh) de uma entidade configurada."""
+        entity_id = self._entry.options.get(chave)
+        if not entity_id:
+            return None
+        estado = self.hass.states.get(str(entity_id))
+        if estado is None or estado.state in ("unknown", "unavailable", ""):
+            return None
+        try:
+            return float(estado.state)
+        except (TypeError, ValueError):
+            return None
+
+    def _calculo_atual(self) -> ResultadoCalculo | None:
+        """Cálculo do posto ativo (fallback: primeiro posto)."""
+        dados = self._dados
+        if dados is None or not dados.calculos:
+            return None
+        posto = self.coordinator.posto_ativo(dt_util.now())
+        if posto is None:
+            return next(iter(dados.calculos.values()), None)
+        return dados.calculos.get(posto) or next(
+            iter(dados.calculos.values()), None
+        )
+
+    def _cip_cosip(self) -> float:
+        """CIP/COSIP configurada (R$/mês)."""
+        try:
+            return float(
+                self._entry.options.get(OPT_CIP_COSIP, DEFAULT_CIP_COSIP)
+            )
+        except (TypeError, ValueError):
+            return DEFAULT_CIP_COSIP
+
+    @property
+    def available(self) -> bool:
+        """Disponível quando há consumo e cálculo de tarifa."""
+        return (
+            super().available
+            and self._estado_kwh(OPT_CONSUMO_ENTITY_ID) is not None
+            and self._calculo_atual() is not None
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Custo estimado do mês (R$), com consumo líquido."""
+        consumo = self._estado_kwh(OPT_CONSUMO_ENTITY_ID)
+        calculo = self._calculo_atual()
+        if consumo is None or calculo is None:
+            return None
+        injecao = self._estado_kwh(OPT_INJECAO_ENTITY_ID) or 0.0
+        liquido = max(consumo - injecao, 0.0)
+        return round(liquido * calculo.tarifa_final + self._cip_cosip(), 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Memória de cálculo da estimativa."""
+        dados = self._dados
+        attrs = self._atributos_padrao(
+            dados.fonte_tarifa if dados is not None else None
+        )
+        consumo = self._estado_kwh(OPT_CONSUMO_ENTITY_ID)
+        injecao = self._estado_kwh(OPT_INJECAO_ENTITY_ID)
+        calculo = self._calculo_atual()
+        attrs.update(
+            {
+                "consumo_kwh": consumo,
+                "injecao_kwh": injecao,
+                "consumo_liquido_kwh": (
+                    max((consumo or 0.0) - (injecao or 0.0), 0.0)
+                    if consumo is not None
+                    else None
+                ),
+                "tarifa_final": (
+                    round(calculo.tarifa_final, 5) if calculo else None
+                ),
+                "cip_cosip_mensal": self._cip_cosip(),
+                "compensacao_considerada": injecao is not None,
+            }
+        )
+        return attrs
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -364,4 +516,6 @@ async def async_setup_entry(
     ]
     if entry.data.get(CONF_MODALIDADE) == MODALIDADE_BRANCA:
         entidades.append(PostoTarifarioSensor(coordinator, entry))
+    if entry.options.get(OPT_CONSUMO_ENTITY_ID):
+        entidades.append(CustoEstimadoMesSensor(coordinator, entry))
     async_add_entities(entidades)

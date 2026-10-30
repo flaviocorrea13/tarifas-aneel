@@ -140,9 +140,15 @@ CONF_CNPJ: Final = "cnpj"
 OPT_ICMS: Final = "icms_percentual"
 OPT_PIS: Final = "pis_percentual"
 OPT_COFINS: Final = "cofins_percentual"
+# True (padrão): PIS/COFINS incidem sobre a base sem ICMS.
+OPT_PIS_COFINS_SEM_ICMS: Final = "pis_cofins_sem_icms"
 OPT_CIP_COSIP: Final = "cip_cosip_mensal"
 OPT_UPDATE_INTERVAL: Final = "update_interval_horas"
 OPT_CONSUMO_ENTITY_ID: Final = "consumo_entity_id"
+OPT_INJECAO_ENTITY_ID: Final = "injecao_entity_id"
+# Data (ISO) em que as alíquotas foram salvas pela última vez. Usada pelo
+# lembrete de revisão de impostos (repair issue não bloqueante).
+OPT_ALIQUOTAS_REVISADAS_EM: Final = "aliquotas_revisadas_em"
 OPT_PONTA_INICIO: Final = "ponta_inicio"
 OPT_PONTA_FIM: Final = "ponta_fim"
 
@@ -155,6 +161,7 @@ OPT_PONTA_FIM: Final = "ponta_fim"
 DEFAULT_ICMS: Final = 0.0
 DEFAULT_PIS: Final = 0.0
 DEFAULT_COFINS: Final = 0.0
+DEFAULT_PIS_COFINS_SEM_ICMS: Final = True
 DEFAULT_CIP_COSIP: Final = 0.0
 DEFAULT_UPDATE_INTERVAL_HOURS: Final = 12
 MIN_UPDATE_INTERVAL_HOURS: Final = 6
@@ -181,6 +188,9 @@ STORE_KEY: Final = "tarifas_aneel_cache"
 STORE_VERSION: Final = 1
 # Abre repair issue se ficar mais de 7 dias apenas com cache.
 REPAIR_CACHE_MAX_AGE_DAYS: Final = 7
+# Lembrete não bloqueante de revisão de impostos a cada 60 dias (ou quando
+# um novo reajuste começa a valer).
+REVISAO_IMPOSTOS_DIAS: Final = 60
 # Binary sensor "dados_desatualizados" se a última atualização real tiver
 # mais de 3 dias.
 STALE_DATA_DAYS: Final = 3
@@ -194,6 +204,9 @@ ATTR_DISTRIBUIDORA: Final = "distribuidora"
 ATTR_SUBGRUPO: Final = "subgrupo"
 ATTR_MODALIDADE: Final = "modalidade"
 ATTR_ALIQUOTAS_APLICADAS: Final = "aliquotas_aplicadas"
+ATTR_IMPOSTOS_CONFIGURADOS: Final = "impostos_configurados"
+ATTR_ALIQUOTAS_REVISADAS_EM: Final = "aliquotas_revisadas_em"
+ATTR_PIS_COFINS_SEM_ICMS: Final = "pis_cofins_sem_icms"
 ATTR_POSTO_TARIFARIO: Final = "posto_tarifario"
 ATTR_TARIFA_POR_POSTO: Final = "tarifa_por_posto"
 

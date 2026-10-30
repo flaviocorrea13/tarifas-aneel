@@ -24,6 +24,10 @@ Estratégia de atualização (a cada 12 h por padrão, mínimo 6 h):
 * ``Repair issue`` é aberto quando o dado corrente vem só do cache há mais
   de 7 dias (última atualização real antiga) e fechado quando os dados
   reais voltam.
+
+* ``Repair issue`` de revisão de impostos é aberto quando a vigência da
+  tarifa mudou depois da última revisão ou quando passaram mais de 60
+  dias; ele é fechado ao salvar o options flow.
 """
 
 from __future__ import annotations
@@ -58,15 +62,18 @@ from custom_components.tarifas_aneel.const import (
     DEFAULT_COFINS,
     DEFAULT_ICMS,
     DEFAULT_PIS,
+    DEFAULT_PIS_COFINS_SEM_ICMS,
     DEFAULT_PONTA_FIM,
     DEFAULT_PONTA_INICIO,
     DEFAULT_UPDATE_INTERVAL_HOURS,
     DOMAIN,
     MIN_UPDATE_INTERVAL_HOURS,
     MODALIDADE_BRANCA,
+    OPT_ALIQUOTAS_REVISADAS_EM,
     OPT_COFINS,
     OPT_ICMS,
     OPT_PIS,
+    OPT_PIS_COFINS_SEM_ICMS,
     OPT_PONTA_FIM,
     OPT_PONTA_INICIO,
     OPT_UPDATE_INTERVAL,
@@ -74,6 +81,7 @@ from custom_components.tarifas_aneel.const import (
     POSTO_INTERMEDIARIO,
     POSTO_PONTA,
     REPAIR_CACHE_MAX_AGE_DAYS,
+    REVISAO_IMPOSTOS_DIAS,
     STORE_KEY,
     STORE_VERSION,
 )
@@ -87,6 +95,7 @@ from custom_components.tarifas_aneel.models import (
 _LOGGER: Final = logging.getLogger(__name__)
 
 REPAIR_ISSUE_CACHE: Final = "cache_antigo"
+REPAIR_ISSUE_REVISAO: Final = "revisao_impostos"
 
 MINUTOS_EM_UMA_HORA: Final = 60
 MINUTOS_EM_UM_DIA: Final = 1440
@@ -198,6 +207,15 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             _pct_para_fracao(opcoes.get(OPT_COFINS, DEFAULT_COFINS)),
         )
 
+    def _pis_cofins_sem_icms(self) -> bool:
+        """Base do PIS/COFINS: sem ICMS (padrão) ou com ICMS (antiga)."""
+        return bool(
+            self._entry.options.get(
+                OPT_PIS_COFINS_SEM_ICMS,
+                DEFAULT_PIS_COFINS_SEM_ICMS,
+            )
+        )
+
     def _janela_ponta(self) -> tuple[time, time]:
         """Lê a janela de ponta (modalidade Branca) das opções."""
         opcoes = self._entry.options
@@ -288,6 +306,7 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             calculos=self._calcular_postos(tarifa, bandeira),
         )
         await self._async_gerenciar_repair(dados, agora)
+        await self._async_gerenciar_revisao_impostos(dados)
         if teve_dado_real:
             await self._async_salvar_cache(dados)
         return dados
@@ -448,9 +467,12 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
         if tarifa is None:
             return {}
         icms, pis, cofins = self._aliquotas()
+        sem_icms = self._pis_cofins_sem_icms()
         adicional = bandeira.adicional if bandeira is not None else 0.0
         try:
-            validar_aliquotas(icms, pis, cofins)
+            validar_aliquotas(
+                icms, pis, cofins, pis_cofins_sem_icms=sem_icms
+            )
         except ValueError as err:
             _LOGGER.warning(
                 "Alíquotas inválidas (%s) — calculando sem impostos "
@@ -468,6 +490,7 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
                     icms,
                     pis,
                     cofins,
+                    pis_cofins_sem_icms=sem_icms,
                 )
             except ValueError as err:
                 # Valores de posto negativos/corrompidos: não podem derrubar
@@ -573,3 +596,57 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             )
         else:
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    # ------------------------------------------------------------------
+    # Repair issue (revisão de impostos)
+    # ------------------------------------------------------------------
+    async def _async_gerenciar_revisao_impostos(
+        self, dados: DadosAneel
+    ) -> None:
+        """Abre/fecha o lembrete não bloqueante de revisão de impostos.
+
+        O issue aparece quando a tarifa em vigor começou depois da última
+        revisão (novo reajuste) ou quando passaram mais de
+        ``REVISAO_IMPOSTOS_DIAS`` dias desde a última revisão. Salvar o
+        options flow atualiza a data e fecha o lembrete.
+        """
+        issue_id = f"{REPAIR_ISSUE_REVISAO}_{self._entry.entry_id}"
+        revisadas = self._entry.options.get(OPT_ALIQUOTAS_REVISADAS_EM)
+        if not revisadas or dados.tarifa is None:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        try:
+            data_revisao = date.fromisoformat(str(revisadas))
+        except ValueError:
+            _LOGGER.warning(
+                "Data de revisão de impostos inválida nas opções: %s",
+                revisadas,
+            )
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+
+        hoje = dt_util.now().date()
+        dias = (hoje - data_revisao).days
+        novo_reajuste = dados.tarifa.inicio_vigencia > data_revisao
+        if not novo_reajuste and dias <= REVISAO_IMPOSTOS_DIAS:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+
+        _LOGGER.debug(
+            "Revisão de impostos pendente para %s: dias=%d, reajuste=%s",
+            self._filtro.distribuidora,
+            dias,
+            novo_reajuste,
+        )
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            is_persistent=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="revisao_impostos",
+            translation_placeholders={
+                "distribuidora": self._filtro.distribuidora,
+            },
+        )

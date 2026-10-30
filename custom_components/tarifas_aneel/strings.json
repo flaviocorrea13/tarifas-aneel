@@ -34,13 +34,16 @@
     "step": {
       "init": {
         "title": "Opções do recorte",
+        "description": "Veja a tabela Tributo/Alíquota na sua conta de luz (PIS, COFINS e ICMS).",
         "data": {
           "icms_percentual": "ICMS (%)",
           "pis_percentual": "PIS (%)",
           "cofins_percentual": "COFINS (%)",
+          "pis_cofins_sem_icms": "PIS/COFINS calculado sem ICMS na base",
           "cip_cosip_mensal": "CIP/COSIP (R$/mês)",
           "update_interval_horas": "Intervalo de atualização (h)",
           "consumo_entity_id": "Sensor de consumo (kWh) — opcional",
+          "injecao_entity_id": "Sensor de injeção (kWh) — opcional",
           "ponta_inicio": "Início da ponta",
           "ponta_fim": "Fim da ponta"
         },
@@ -48,22 +51,31 @@
           "icms_percentual": "Alíquota de ICMS da sua fatura, em % (ex.: 18). Aplicada no gross-up \"por dentro\".",
           "pis_percentual": "Alíquota de PIS, em % (ex.: 0,65).",
           "cofins_percentual": "Alíquota de COFINS, em % (ex.: 3,64).",
+          "pis_cofins_sem_icms": "Ligado (recomendado): o PIS/COFINS é calculado sobre a base sem ICMS. Desligado: usa a fórmula antiga, com todos os tributos sobre a mesma base.",
           "cip_cosip_mensal": "Custo fixo mensal de CIP/COSIP em R$ (informativo; não entra no R$/kWh).",
           "update_interval_horas": "Frequência de atualização junto à ANEEL (mínimo 6 h).",
-          "consumo_entity_id": "Sensor de consumo em kWh para automações (opcional).",
+          "consumo_entity_id": "Sensor com o consumo do mês em kWh (ex.: utility_meter mensal). Habilita o custo estimado do mês.",
+          "injecao_entity_id": "Sensor com a energia injetada na rede no mês (kWh). O custo estimado desconta a compensação; sem ele, a microgeração não é considerada.",
           "ponta_inicio": "Início do horário de ponta da sua distribuidora (só modalidade Branca).",
           "ponta_fim": "Fim do horário de ponta (só modalidade Branca)."
         }
       }
     },
     "error": {
-      "soma_aliquotas": "A soma de ICMS + PIS + COFINS deve ser menor que 100%."
+      "icms_invalido": "O ICMS deve ser maior ou igual a 0% e menor que 100%.",
+      "aliquota_negativa": "PIS e COFINS não podem ser negativos.",
+      "pis_cofins_invalidos": "A soma de PIS + COFINS deve ser menor que 100%.",
+      "soma_aliquotas": "Na fórmula antiga, a soma de ICMS + PIS + COFINS deve ser menor que 100%."
     }
   },
   "issues": {
     "dados_apenas_cache": {
       "title": "Dados tarifários desatualizados ({distribuidora})",
       "description": "A integração Tarifas ANEEL não consegue atualizar o recorte {distribuidora} há {dias} dias (última atualização real: {ultima}). Os valores exibidos vêm do cache local. Verifique a conexão ou o portal de dados abertos da ANEEL; a atualização retoma automaticamente."
+    },
+    "revisao_impostos": {
+      "title": "Revise os impostos ({distribuidora})",
+      "description": "Confira ICMS, PIS, COFINS e CIP/COSIP na sua conta de luz e atualize nas opções."
     }
   },
   "entity": {
@@ -91,6 +103,9 @@
       },
       "custo_fixo_mensal": {
         "name": "CIP/COSIP mensal"
+      },
+      "custo_estimado_mes": {
+        "name": "Custo estimado no mês"
       }
     },
     "binary_sensor": {

@@ -34,13 +34,16 @@
     "step": {
       "init": {
         "title": "Slice options",
+        "description": "Check the Tax/Rate table on your electricity bill (PIS, COFINS and ICMS).",
         "data": {
           "icms_percentual": "ICMS (%)",
           "pis_percentual": "PIS (%)",
           "cofins_percentual": "COFINS (%)",
+          "pis_cofins_sem_icms": "PIS/COFINS calculated without ICMS in the base",
           "cip_cosip_mensal": "CIP/COSIP (R$/month)",
           "update_interval_horas": "Update interval (h)",
           "consumo_entity_id": "Energy consumption sensor (kWh) — optional",
+          "injecao_entity_id": "Grid injection sensor (kWh) — optional",
           "ponta_inicio": "Peak start",
           "ponta_fim": "Peak end"
         },
@@ -48,22 +51,31 @@
           "icms_percentual": "ICMS rate from your bill, in % (e.g. 18). Applied as the 'inclusive' gross-up.",
           "pis_percentual": "PIS rate, in % (e.g. 0.65).",
           "cofins_percentual": "COFINS rate, in % (e.g. 3.64).",
+          "pis_cofins_sem_icms": "On (recommended): PIS/COFINS is calculated on the base without ICMS. Off: uses the old formula, with all taxes on the same base.",
           "cip_cosip_mensal": "Monthly CIP/COSIP fixed cost in R$ (informational; not included in R$/kWh).",
           "update_interval_horas": "How often data is fetched from ANEEL (minimum 6 h).",
-          "consumo_entity_id": "kWh consumption sensor for automations (optional).",
+          "consumo_entity_id": "Sensor with the month's consumption in kWh (e.g. a monthly utility_meter). Enables the estimated monthly cost.",
+          "injecao_entity_id": "Sensor with the month's energy injected into the grid (kWh). The estimate deducts compensation; without it, microgeneration is not considered.",
           "ponta_inicio": "Start of the peak period for your utility (White modality only).",
           "ponta_fim": "End of the peak period (White modality only)."
         }
       }
     },
     "error": {
-      "soma_aliquotas": "ICMS + PIS + COFINS must be below 100%."
+      "icms_invalido": "ICMS must be greater than or equal to 0% and below 100%.",
+      "aliquota_negativa": "PIS and COFINS cannot be negative.",
+      "pis_cofins_invalidos": "PIS + COFINS must be below 100%.",
+      "soma_aliquotas": "With the old formula, ICMS + PIS + COFINS must be below 100%."
     }
   },
   "issues": {
     "dados_apenas_cache": {
       "title": "Stale tariff data ({distribuidora})",
       "description": "The Tarifas ANEEL integration has not been able to update the {distribuidora} slice for {dias} days (last real update: {ultima}). The displayed values come from the local cache. Check connectivity or the ANEEL open-data portal; updates will resume automatically."
+    },
+    "revisao_impostos": {
+      "title": "Review the taxes ({distribuidora})",
+      "description": "Check ICMS, PIS, COFINS and CIP/COSIP on your electricity bill and update them in the options."
     }
   },
   "entity": {
@@ -91,6 +103,9 @@
       },
       "custo_fixo_mensal": {
         "name": "Monthly CIP/COSIP"
+      },
+      "custo_estimado_mes": {
+        "name": "Estimated monthly cost"
       }
     },
     "binary_sensor": {
