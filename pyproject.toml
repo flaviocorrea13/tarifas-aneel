@@ -7,6 +7,13 @@
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# brand/ contém apenas imagens e um script auxiliar de geração; tools/
+# reúne utilitários de linha de comando com prints intencionais. Nenhum
+# dos dois é código da integração e não deve ser lintado.
+extend-exclude = [
+    "custom_components/tarifas_aneel/brand",
+    "tools",
+]
 
 [tool.ruff.lint]
 # O en-dash (–) e o em-dash (—) aparecem em valores REAIS da API da ANEEL

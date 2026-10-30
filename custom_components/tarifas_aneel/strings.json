@@ -89,6 +89,12 @@
       "tarifa_sem_impostos": {
         "name": "Tarifa sem impostos"
       },
+      "tarifa_com_bandeira": {
+        "name": "Tarifa com bandeira (sem impostos)"
+      },
+      "tarifa_com_impostos": {
+        "name": "Tarifa com impostos (sem bandeira)"
+      },
       "tarifa_tusd": {
         "name": "TUSD"
       },
@@ -104,6 +110,21 @@
       "posto_tarifario": {
         "name": "Posto tarifário"
       },
+      "vigencia_inicio": {
+        "name": "Início da vigência"
+      },
+      "vigencia_fim": {
+        "name": "Fim da vigência"
+      },
+      "fonte_dado_tarifa": {
+        "name": "Fonte dos dados da tarifa"
+      },
+      "fonte_dado_bandeira": {
+        "name": "Fonte dos dados da bandeira"
+      },
+      "ultima_atualizacao_sucesso": {
+        "name": "Última atualização com sucesso"
+      },
       "custo_fixo_mensal": {
         "name": "CIP/COSIP mensal"
       },
@@ -114,6 +135,12 @@
     "binary_sensor": {
       "dados_desatualizados": {
         "name": "Dados desatualizados"
+      },
+      "status_api": {
+        "name": "Status da API"
+      },
+      "bandeira_vermelha_ativa": {
+        "name": "Bandeira vermelha ativa"
       }
     },
     "button": {

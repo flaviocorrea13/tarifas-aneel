@@ -26,6 +26,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
@@ -70,7 +71,7 @@ from custom_components.tarifas_aneel.const import (
 )
 from custom_components.tarifas_aneel.coordinator import AneelTarifasCoordinator
 from custom_components.tarifas_aneel.entity import AneelBaseEntity
-from custom_components.tarifas_aneel.models import ResultadoCalculo
+from custom_components.tarifas_aneel.models import FonteDado, ResultadoCalculo
 
 # O posto tarifário muda em horários cheios; uma verificação leve a cada
 # 5 min garante que o estado troque perto da virada (a troca em si só
@@ -224,6 +225,34 @@ class TarifaSemImpostosSensor(TarifaSensor):
         super().__init__(coordinator, entry, "tarifa_sem_impostos")
 
 
+class TarifaComBandeiraSensor(TarifaSensor):
+    """TUSD + TE + adicional da bandeira, ainda sem impostos (R$/kWh)."""
+
+    _campo = "tarifa_com_bandeira"
+    _expoe_impostos = True
+    _attr_icon = "mdi:cash-plus"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "tarifa_com_bandeira")
+
+
+class TarifaComImpostosSensor(TarifaSensor):
+    """TUSD + TE com impostos, ainda sem bandeira (R$/kWh)."""
+
+    _campo = "tarifa_com_impostos"
+    _expoe_impostos = True
+    _attr_icon = "mdi:cash-percent"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "tarifa_com_impostos")
+
+
 class TUSDSensor(TarifaSensor):
     """Uso do sistema de distribuição (R$/kWh) do posto ativo."""
 
@@ -248,6 +277,172 @@ class TESensor(TarifaSensor):
     ) -> None:
         """Inicializa o sensor."""
         super().__init__(coordinator, entry, "tarifa_te")
+
+
+class VigenciaSensor(AneelBaseEntity, SensorEntity):
+    """Data de vigência da tarifa (início ou fim), com ``device_class`` date."""
+
+    _attr_device_class = SensorDeviceClass.DATE
+    _attr_icon = "mdi:calendar"
+    _campo: str = ""
+
+    def __init__(
+        self,
+        coordinator: AneelTarifasCoordinator,
+        entry: ConfigEntry,
+        unique_suffix: str,
+    ) -> None:
+        """Inicializa o sensor de data."""
+        super().__init__(coordinator, entry, unique_suffix)
+        self._attr_translation_key = unique_suffix
+
+    @property
+    def _valor(self) -> date | None:
+        """Data do campo exposto (``None`` sem tarifa carregada)."""
+        dados = self._dados
+        if dados is None or dados.tarifa is None:
+            return None
+        return getattr(dados.tarifa, self._campo)
+
+    @property
+    def available(self) -> bool:
+        """Indisponível enquanto a data não existir (ex.: vigência aberta)."""
+        return super().available and self._valor is not None
+
+    @property
+    def native_value(self) -> date | None:
+        """Data de vigência (ISO no estado da entidade)."""
+        return self._valor
+
+
+class VigenciaInicioSensor(VigenciaSensor):
+    """Início da vigência da tarifa em uso."""
+
+    _campo = "inicio_vigencia"
+    _attr_icon = "mdi:calendar-start"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "vigencia_inicio")
+
+
+class VigenciaFimSensor(VigenciaSensor):
+    """Fim da vigência da tarifa em uso (pode ser aberta)."""
+
+    _campo = "fim_vigencia"
+    _attr_icon = "mdi:calendar-end"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "vigencia_fim")
+
+
+class FonteDadoSensor(AneelBaseEntity, SensorEntity):
+    """Origem do dado publicado (API, CSV ou Cache) — diagnóstico."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:database-arrow-right"
+    _campo: str = ""
+
+    def __init__(
+        self,
+        coordinator: AneelTarifasCoordinator,
+        entry: ConfigEntry,
+        unique_suffix: str,
+    ) -> None:
+        """Inicializa o sensor de origem."""
+        super().__init__(coordinator, entry, unique_suffix)
+        self._attr_translation_key = unique_suffix
+
+    @property
+    def _fonte(self) -> FonteDado | None:
+        """Fonte registrada pelo coordinator para o item."""
+        dados = self._dados
+        return getattr(dados, self._campo, None) if dados is not None else None
+
+    @property
+    def available(self) -> bool:
+        """Indisponível enquanto a origem não foi registrada."""
+        return super().available and self._fonte is not None
+
+    @property
+    def native_value(self) -> str | None:
+        """``API``, ``CSV`` ou ``Cache``."""
+        fonte = self._fonte
+        return fonte.value if fonte is not None else None
+
+
+class FonteDadoTarifaSensor(FonteDadoSensor):
+    """Origem dos dados de tarifa."""
+
+    _campo = "fonte_tarifa"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "fonte_dado_tarifa")
+
+
+class FonteDadoBandeiraSensor(FonteDadoSensor):
+    """Origem dos dados de bandeira."""
+
+    _campo = "fonte_bandeira"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor."""
+        super().__init__(coordinator, entry, "fonte_dado_bandeira")
+
+
+class UltimaAtualizacaoSensor(AneelBaseEntity, SensorEntity):
+    """Instante da última atualização com dados reais (API/CSV)."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-check-outline"
+    _attr_translation_key = "ultima_atualizacao_sucesso"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor de atualização."""
+        super().__init__(coordinator, entry, "ultima_atualizacao_sucesso")
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Última vez em que a ANEEL entregou dado real."""
+        dados = self._dados
+        return dados.ultima_atualizacao_real if dados is not None else None
+
+    @property
+    def available(self) -> bool:
+        """Indisponível enquanto nunca houve dado real."""
+        return super().available and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Origem atual de cada item, para leitura rápida do diagnóstico."""
+        dados = self._dados
+        if dados is None:
+            return {}
+        return {
+            "fonte_tarifa": (
+                dados.fonte_tarifa.value
+                if dados.fonte_tarifa is not None
+                else None
+            ),
+            "fonte_bandeira": (
+                dados.fonte_bandeira.value
+                if dados.fonte_bandeira is not None
+                else None
+            ),
+        }
 
 
 class AdicionalBandeiraSensor(TarifaSensor):
@@ -663,11 +858,18 @@ async def async_setup_entry(
     coordinator: AneelTarifasCoordinator = entry.runtime_data
     entidades: list[SensorEntity] = [
         TarifaFinalSensor(coordinator, entry),
+        TarifaComBandeiraSensor(coordinator, entry),
+        TarifaComImpostosSensor(coordinator, entry),
         TarifaSemImpostosSensor(coordinator, entry),
         TUSDSensor(coordinator, entry),
         TESensor(coordinator, entry),
         AdicionalBandeiraSensor(coordinator, entry),
         BandeiraAtualSensor(coordinator, entry),
+        VigenciaInicioSensor(coordinator, entry),
+        VigenciaFimSensor(coordinator, entry),
+        FonteDadoTarifaSensor(coordinator, entry),
+        FonteDadoBandeiraSensor(coordinator, entry),
+        UltimaAtualizacaoSensor(coordinator, entry),
         CustoFixoMensalSensor(coordinator, entry),
     ]
     if entry.data.get(CONF_MODALIDADE) == MODALIDADE_BRANCA:

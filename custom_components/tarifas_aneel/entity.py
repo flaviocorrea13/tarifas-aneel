@@ -63,11 +63,15 @@ class AneelBaseEntity(CoordinatorEntity[AneelTarifasCoordinator]):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{unique_suffix}"
         sigla = str(entry.data.get(CONF_DISTRIBUIDORA, ""))
-        nome = DISTRIBUTOR_NAMES.get(sigla, sigla)
+        nome = DISTRIBUTOR_NAMES.get(sigla, sigla) or "Tarifas ANEEL"
+        # O dicionário carrega a UF entre parênteses ("Energisa Mato Grosso
+        # do Sul (MS)"); no nome do dispositivo usamos só o nome amigável.
+        if nome.endswith(")") and " (" in nome:
+            nome = nome.rsplit(" (", 1)[0]
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             manufacturer=DEVICE_MANUFACTURER,
-            name=f"Tarifas ANEEL {nome}".strip(),
+            name=nome,
             model=(
                 f"{entry.data.get(CONF_SUBGRUPO, '')} • "
                 f"{entry.data.get(CONF_MODALIDADE, '')}"

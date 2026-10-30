@@ -230,7 +230,7 @@ ATTR_RESET_DETECTADO: Final = "reset_detectado"
 ATTR_COMPENSACAO_CONSIDERADA: Final = "compensacao_considerada"
 ATTR_CREDITOS_NAO_CONSIDERADOS: Final = "creditos_nao_considerados"
 
-DEVICE_MANUFACTURER: Final = "ANEEL"
+DEVICE_MANUFACTURER: Final = "Dados Abertos ANEEL"
 
 # ---------------------------------------------------------------------------
 # Distribuidoras: siglas reais conforme retornadas pela API (Fase 0).

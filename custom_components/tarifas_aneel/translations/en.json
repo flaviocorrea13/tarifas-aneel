@@ -89,6 +89,12 @@
       "tarifa_sem_impostos": {
         "name": "Tariff without taxes"
       },
+      "tarifa_com_bandeira": {
+        "name": "Tariff with flag (no taxes)"
+      },
+      "tarifa_com_impostos": {
+        "name": "Tariff with taxes (no flag)"
+      },
       "tarifa_tusd": {
         "name": "TUSD"
       },
@@ -104,6 +110,21 @@
       "posto_tarifario": {
         "name": "Time-of-use period"
       },
+      "vigencia_inicio": {
+        "name": "Validity start"
+      },
+      "vigencia_fim": {
+        "name": "Validity end"
+      },
+      "fonte_dado_tarifa": {
+        "name": "Tariff data source"
+      },
+      "fonte_dado_bandeira": {
+        "name": "Flag data source"
+      },
+      "ultima_atualizacao_sucesso": {
+        "name": "Last successful update"
+      },
       "custo_fixo_mensal": {
         "name": "Monthly CIP/COSIP"
       },
@@ -114,6 +135,12 @@
     "binary_sensor": {
       "dados_desatualizados": {
         "name": "Stale data"
+      },
+      "status_api": {
+        "name": "API status"
+      },
+      "bandeira_vermelha_ativa": {
+        "name": "Red flag active"
       }
     },
     "button": {

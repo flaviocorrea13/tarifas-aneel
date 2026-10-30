@@ -240,22 +240,33 @@ aviso não impede o funcionamento da integração.
 
 ## 6. Entidades
 
-Cada integração cria um dispositivo **Tarifas ANEEL**. Os nomes abaixo são
-os nomes das entidades; o prefixo do `entity_id` varia conforme o nome do
-dispositivo.
+Cada integração cria um dispositivo com o **nome amigável da distribuidora**
+(ex.: *Energisa Mato Grosso do Sul*), fabricante *Dados Abertos ANEEL* e
+modelo no formato `subgrupo • modalidade` (ex.: `B1 • Convencional`). Os
+nomes abaixo são os nomes das entidades; o prefixo do `entity_id` varia
+conforme o nome do dispositivo.
 
 | Entidade | Tipo | Unidade | Descrição | Principais atributos |
 |---|---|---|---|---|
 | `sensor..._tarifa_final` | Numérico | R$/kWh | **Preço final** com impostos e bandeira. É a entidade recomendada para o painel de Energia. | `fonte_dado`, `posto_tarifario`, `tarifa_por_posto` (Branca), `aliquotas_aplicadas`, `impostos_configurados`, `aliquotas_revisadas_em`, `pis_cofins_sem_icms`, `data_competencia` |
 | `sensor..._tarifa_sem_impostos` | Numérico | R$/kWh | TUSD + TE, antes de impostos e bandeira. | `fonte_dado`, `aliquotas_aplicadas`, `impostos_configurados`, `aliquotas_revisadas_em`, `pis_cofins_sem_icms` |
+| `sensor..._tarifa_com_bandeira` | Numérico | R$/kWh | TUSD + TE + adicional da bandeira, ainda **sem impostos**. | `fonte_dado`, `aliquotas_aplicadas`, `impostos_configurados`, `aliquotas_revisadas_em`, `pis_cofins_sem_icms` |
+| `sensor..._tarifa_com_impostos` | Numérico | R$/kWh | TUSD + TE com impostos, ainda **sem bandeira**. | `fonte_dado`, `aliquotas_aplicadas`, `impostos_configurados`, `aliquotas_revisadas_em`, `pis_cofins_sem_icms` |
 | `sensor..._tarifa_tusd` | Numérico | R$/kWh | TUSD do posto ativo. | `fonte_dado`, `aliquotas_aplicadas`, `data_competencia` |
 | `sensor..._tarifa_te` | Numérico | R$/kWh | TE do posto ativo. | `fonte_dado`, `aliquotas_aplicadas`, `data_competencia` |
 | `sensor..._adicional_bandeira` | Numérico | R$/kWh | Adicional da bandeira vigente. | `fonte_dado`, `data_competencia` |
 | `sensor..._bandeira_tarifaria` | Texto | — | Nome da bandeira (Verde, Amarela, Vermelha P1/P2, Escassez Hídrica). | `bandeira`, `adicional_rsmwh`, `adicional_rskwh`, `mes_anterior`, `consultado_em` |
 | `sensor..._posto_tarifario` | Texto | — | Posto ativo no momento. Criado apenas na modalidade Branca. | `fonte_dado` |
+| `sensor..._vigencia_inicio` | Data | — | Início da vigência da tarifa em uso. | `fonte_dado` |
+| `sensor..._vigencia_fim` | Data | — | Fim da vigência (indisponível quando a vigência é aberta). | `fonte_dado` |
+| `sensor..._fonte_dado_tarifa` | Diagnóstico | — | Origem da tarifa: `API`, `CSV` ou `Cache`. | — |
+| `sensor..._fonte_dado_bandeira` | Diagnóstico | — | Origem da bandeira: `API`, `CSV` ou `Cache`. | — |
+| `sensor..._ultima_atualizacao_sucesso` | Diagnóstico (timestamp) | — | Última vez em que a ANEEL entregou dado real. | `fonte_tarifa`, `fonte_bandeira` |
 | `sensor..._cip_cosip_mensal` | Monetário | R$/mês | CIP/COSIP configurada. Não entra no R$/kWh. | — |
 | `sensor..._custo_estimado_ciclo` | Monetário | R$ | Estimativa do ciclo de leitura: consumo líquido × tarifa final + CIP/COSIP. Criado apenas se houver sensor de consumo. | `dia_leitura`, `ciclo_inicio`, `ciclo_fim`, `consumo_kwh`, `injecao_kwh`, `consumo_liquido_kwh`, `tarifa_final`, `cip_cosip`, `reset_detectado`, `compensacao_considerada`, `creditos_nao_considerados` |
 | `binary_sensor..._dados_desatualizados` | Problema (ligado/desligado) | — | Ligado quando a última atualização real tem mais de **3 dias** ou nunca chegou dado real. | `fonte_dado` |
+| `binary_sensor..._status_api` | Conectividade | — | Ligado quando tarifa **e** bandeira vieram da API (tempo real); CSV/cache desligam. | `fonte_tarifa`, `fonte_bandeira` |
+| `binary_sensor..._bandeira_vermelha_ativa` | Ligado/desligado | — | Ligado quando a bandeira vigente é Vermelha P1 ou P2. | `bandeira`, `adicional_rskwh` |
 | `button..._atualizar_agora` | Botão | — | Força uma atualização imediata do coordinator. | — |
 
 Os sensores de preço usam `state_class: measurement` e unidade
