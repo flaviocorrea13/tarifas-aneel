@@ -144,6 +144,8 @@ class BandeiraVermelhaBinarySensor(AneelBaseEntity, BinarySensorEntity):
         return {
             "bandeira": dados.bandeira.nome,
             "adicional_rskwh": round(dados.bandeira.adicional, 5),
+            "competencia_usada": dados.bandeira.competencia.strftime("%Y-%m"),
+            "usou_mes_anterior": dados.bandeira.mes_anterior,
         }
 
 

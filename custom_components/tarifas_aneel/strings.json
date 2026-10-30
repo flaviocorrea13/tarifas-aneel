@@ -90,10 +90,10 @@
         "name": "Tarifa sem impostos"
       },
       "tarifa_com_bandeira": {
-        "name": "Tarifa com bandeira (sem impostos)"
+        "name": "Tarifa c/ bandeira"
       },
       "tarifa_com_impostos": {
-        "name": "Tarifa com impostos (sem bandeira)"
+        "name": "Tarifa c/ impostos"
       },
       "tarifa_tusd": {
         "name": "TUSD"

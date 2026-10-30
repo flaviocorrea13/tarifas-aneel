@@ -7,8 +7,11 @@ lógica dos indicadores, não o ciclo de vida do HA.
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import UTC, date, datetime
 import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -29,7 +32,10 @@ from custom_components.tarifas_aneel.const import (
     CONF_SUBGRUPO,
     DOMAIN,
 )
-from custom_components.tarifas_aneel.coordinator import DadosAneel
+from custom_components.tarifas_aneel.coordinator import (
+    AneelTarifasCoordinator,
+    DadosAneel,
+)
 from custom_components.tarifas_aneel.models import (
     BandeiraData,
     FonteDado,
@@ -39,6 +45,7 @@ from custom_components.tarifas_aneel.models import (
 )
 from custom_components.tarifas_aneel.sensor import (
     AdicionalBandeiraSensor,
+    BandeiraAtualSensor,
     FonteDadoBandeiraSensor,
     FonteDadoTarifaSensor,
     TarifaComBandeiraSensor,
@@ -102,15 +109,19 @@ def _tarifa(fim_vigencia: date | None = date(2027, 7, 3)) -> TarifaData:
 
 
 def _bandeira(
-    nome: str = "Verde", fonte: FonteDado = FonteDado.API
+    nome: str = "Verde",
+    fonte: FonteDado = FonteDado.API,
+    competencia: date = date(2026, 10, 1),
+    mes_anterior: bool = False,
 ) -> BandeiraData:
     """Bandeira de teste."""
     return BandeiraData(
-        competencia=date(2026, 10, 1),
+        competencia=competencia,
         nome=nome,
         adicional_rsmwh=0.0,
         adicional=0.0,
         fonte=fonte,
+        mes_anterior=mes_anterior,
     )
 
 
@@ -184,6 +195,152 @@ def test_sensores_de_preco_intermediarios() -> None:
     assert AdicionalBandeiraSensor(
         coord, ENTRY
     ).native_value == pytest.approx(0.05)
+
+
+def test_descricao_e_icone_dos_precos_intermediarios() -> None:
+    """Nome curto na entidade e explicação no atributo ``descricao``."""
+    coord = _coord(_dados())
+
+    com_bandeira = TarifaComBandeiraSensor(coord, ENTRY)
+    com_impostos = TarifaComImpostosSensor(coord, ENTRY)
+
+    assert com_bandeira.extra_state_attributes["descricao"] == "sem impostos"
+    assert com_impostos.extra_state_attributes["descricao"] == "sem bandeira"
+    assert com_bandeira.icon == "mdi:cash-plus"
+    assert com_impostos.icon == "mdi:cash-percent"
+    # Os demais sensores de preço não ganham descrição inventada.
+    assert "descricao" not in TarifaFinalSensor(
+        coord, ENTRY
+    ).extra_state_attributes
+
+
+def test_vigencia_native_value_e_date_nunca_datetime_ou_string() -> None:
+    """O estado das datas é ``datetime.date`` (o HA localiza na exibição)."""
+    coord = _coord(_dados())
+    inicio = VigenciaInicioSensor(coord, ENTRY)
+    fim = VigenciaFimSensor(coord, ENTRY)
+
+    assert type(inicio.native_value) is date
+    assert type(fim.native_value) is date
+
+    # Um datetime vindo de camada externa é reduzido à data.
+    dados = _dados()
+    dados.tarifa = replace(
+        dados.tarifa,
+        inicio_vigencia=datetime(2026, 7, 4, 10, 30, tzinfo=UTC),
+    )
+    sensor_datetime = VigenciaInicioSensor(_coord(dados), ENTRY)
+    assert sensor_datetime.native_value == date(2026, 7, 4)
+    assert type(sensor_datetime.native_value) is date
+
+    # Qualquer valor inválido (ex.: string) não vira estado.
+    dados.tarifa = replace(dados.tarifa, inicio_vigencia="2026-07-04")
+    sensor_string = VigenciaInicioSensor(_coord(dados), ENTRY)
+    assert sensor_string.native_value is None
+    assert sensor_string.available is False
+
+
+def test_atributos_de_competencia_da_bandeira() -> None:
+    """A bandeira expõe a competência usada e o fallback de mês."""
+    bandeira_anterior = _bandeira(
+        competencia=date(2026, 10, 1), mes_anterior=True
+    )
+    coord = _coord(_dados(bandeira=bandeira_anterior))
+
+    atual = BandeiraAtualSensor(coord, ENTRY)
+    vermelha = BandeiraVermelhaBinarySensor(coord, ENTRY)
+
+    assert atual.extra_state_attributes["competencia_usada"] == "2026-10"
+    assert atual.extra_state_attributes["usou_mes_anterior"] is True
+    assert vermelha.extra_state_attributes["competencia_usada"] == "2026-10"
+    assert vermelha.extra_state_attributes["usou_mes_anterior"] is True
+
+    bandeira_atual = _bandeira(competencia=date(2026, 11, 1))
+    coord_atual = _coord(_dados(bandeira=bandeira_atual))
+    assert (
+        BandeiraAtualSensor(
+            coord_atual, ENTRY
+        ).extra_state_attributes["competencia_usada"]
+        == "2026-11"
+    )
+    assert (
+        BandeiraAtualSensor(
+            coord_atual, ENTRY
+        ).extra_state_attributes["usou_mes_anterior"]
+        is False
+    )
+
+
+def _coordinator_de_bandeira() -> SimpleNamespace:
+    """Objeto mínimo com ``hass`` para o método de busca da bandeira."""
+    return SimpleNamespace(hass=SimpleNamespace())
+
+
+def test_virada_de_mes_usa_mes_anterior_quando_atual_ausente(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Sem bandeira do mês novo, usa a do mês anterior e sinaliza."""
+    mes_atual = date(2026, 11, 1)
+    mes_anterior = date(2026, 10, 1)
+    chamadas: list[date] = []
+
+    async def fetch(_hass: Any, competencia: date) -> BandeiraData | None:
+        chamadas.append(competencia)
+        if competencia == mes_anterior:
+            return _bandeira(competencia=mes_anterior)
+        return None
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.tarifas_aneel.coordinator",
+    ):
+        bandeira = asyncio.run(
+            AneelTarifasCoordinator._async_bandeira_no_mes(
+                _coordinator_de_bandeira(), fetch, mes_atual, mes_anterior
+            )
+        )
+
+    assert chamadas == [mes_atual, mes_anterior]
+    assert bandeira is not None
+    assert bandeira.competencia == mes_anterior
+    assert bandeira.mes_anterior is True
+    mensagens = [registro.getMessage() for registro in caplog.records]
+    assert any(
+        "mês anterior" in mensagem and "2026-10" in mensagem
+        for mensagem in mensagens
+    )
+
+
+def test_virada_de_mes_usa_mes_atual_quando_presente(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Com bandeira do mês novo, não há fallback nem aviso de mês anterior."""
+    mes_atual = date(2026, 11, 1)
+    mes_anterior = date(2026, 10, 1)
+    chamadas: list[date] = []
+
+    async def fetch(_hass: Any, competencia: date) -> BandeiraData | None:
+        chamadas.append(competencia)
+        return _bandeira(competencia=competencia)
+
+    with caplog.at_level(
+        logging.DEBUG,
+        logger="custom_components.tarifas_aneel.coordinator",
+    ):
+        bandeira = asyncio.run(
+            AneelTarifasCoordinator._async_bandeira_no_mes(
+                _coordinator_de_bandeira(), fetch, mes_atual, mes_anterior
+            )
+        )
+
+    assert chamadas == [mes_atual]
+    assert bandeira is not None
+    assert bandeira.competencia == mes_atual
+    assert bandeira.mes_anterior is False
+    assert not any(
+        "ainda não publicada" in registro.getMessage()
+        for registro in caplog.records
+    )
 
 
 def test_sensores_de_vigencia() -> None:
@@ -327,3 +484,34 @@ def test_traducoes_tem_todas_as_entidades() -> None:
     for arquivo, entidade in _json_entidades().items():
         assert set(entidade["sensor"]) == sensores, arquivo
         assert set(entidade["binary_sensor"]) == binarios, arquivo
+
+
+def test_nomes_curtos_dos_precos_intermediarios() -> None:
+    """pt-BR usa "c/" e o inglês encurta com "w/"."""
+    traducoes = _json_entidades()
+
+    pt_br = next(
+        entidade
+        for arquivo, entidade in traducoes.items()
+        if Path(arquivo).name == "pt-BR.json"
+    )
+    en = next(
+        entidade
+        for arquivo, entidade in traducoes.items()
+        if Path(arquivo).name == "en.json"
+    )
+    strings = next(
+        entidade
+        for arquivo, entidade in traducoes.items()
+        if Path(arquivo).name == "strings.json"
+    )
+
+    for entidade in (pt_br, strings):
+        assert entidade["sensor"]["tarifa_com_bandeira"]["name"] == (
+            "Tarifa c/ bandeira"
+        )
+        assert entidade["sensor"]["tarifa_com_impostos"]["name"] == (
+            "Tarifa c/ impostos"
+        )
+    assert en["sensor"]["tarifa_com_bandeira"]["name"] == "Tariff w/ flag"
+    assert en["sensor"]["tarifa_com_impostos"]["name"] == "Tariff w/ taxes"

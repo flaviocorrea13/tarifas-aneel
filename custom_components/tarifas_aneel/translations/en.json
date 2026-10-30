@@ -90,10 +90,10 @@
         "name": "Tariff without taxes"
       },
       "tarifa_com_bandeira": {
-        "name": "Tariff with flag (no taxes)"
+        "name": "Tariff w/ flag"
       },
       "tarifa_com_impostos": {
-        "name": "Tariff with taxes (no flag)"
+        "name": "Tariff w/ taxes"
       },
       "tarifa_tusd": {
         "name": "TUSD"

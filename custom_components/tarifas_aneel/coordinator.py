@@ -516,6 +516,11 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
                 "Camada 3 (cache): bandeira do cache (competência %s)",
                 cache.bandeira.competencia,
             )
+            if cache.bandeira.mes_anterior:
+                _LOGGER.debug(
+                    "Bandeira do cache usa o mês anterior: competência %s",
+                    cache.bandeira.competencia.strftime("%Y-%m"),
+                )
             return cache.bandeira, FonteDado.CACHE
         _LOGGER.debug("Bandeira: todas as camadas falharam (sem cache)")
         return None, None
@@ -550,6 +555,12 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
                 bandeira = None
         if bandeira is not None and bandeira.competencia != mes_atual:
             bandeira = replace(bandeira, mes_anterior=True)
+            _LOGGER.debug(
+                "Bandeira de %s ainda não publicada; usando a competência "
+                "%s (mês anterior)",
+                mes_atual.strftime("%Y-%m"),
+                bandeira.competencia.strftime("%Y-%m"),
+            )
         return bandeira
 
     # ------------------------------------------------------------------

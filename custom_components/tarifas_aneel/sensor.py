@@ -96,6 +96,8 @@ class TarifaSensor(AneelBaseEntity, SensorEntity):
     # Sensores de preço que dependem de impostos expõem os atributos de
     # configuração/revisão (final e sem impostos).
     _expoe_impostos: bool = False
+    # Explicação curta exposta em ``descricao`` (ex.: "sem impostos").
+    _descricao: str | None = None
 
     def __init__(
         self,
@@ -179,6 +181,8 @@ class TarifaSensor(AneelBaseEntity, SensorEntity):
         )
         if self._expoe_impostos:
             attrs.update(self._atributos_impostos())
+        if self._descricao is not None:
+            attrs["descricao"] = self._descricao
         return attrs
 
 
@@ -230,6 +234,7 @@ class TarifaComBandeiraSensor(TarifaSensor):
 
     _campo = "tarifa_com_bandeira"
     _expoe_impostos = True
+    _descricao = "sem impostos"
     _attr_icon = "mdi:cash-plus"
 
     def __init__(
@@ -244,6 +249,7 @@ class TarifaComImpostosSensor(TarifaSensor):
 
     _campo = "tarifa_com_impostos"
     _expoe_impostos = True
+    _descricao = "sem bandeira"
     _attr_icon = "mdi:cash-percent"
 
     def __init__(
@@ -302,7 +308,12 @@ class VigenciaSensor(AneelBaseEntity, SensorEntity):
         dados = self._dados
         if dados is None or dados.tarifa is None:
             return None
-        return getattr(dados.tarifa, self._campo)
+        valor = getattr(dados.tarifa, self._campo, None)
+        # Garante ``datetime.date`` no estado (nunca string); um eventual
+        # datetime é reduzido à data.
+        if isinstance(valor, datetime):
+            return valor.date()
+        return valor if isinstance(valor, date) else None
 
     @property
     def available(self) -> bool:
@@ -484,7 +495,9 @@ class BandeiraAtualSensor(AneelBaseEntity, SensorEntity):
     def native_value(self) -> str | None:
         """Nome da bandeira acionada na competência vigente."""
         dados = self._dados
-        return dados.bandeira.nome if dados is not None else None
+        if dados is None or dados.bandeira is None:
+            return None
+        return dados.bandeira.nome
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -498,6 +511,10 @@ class BandeiraAtualSensor(AneelBaseEntity, SensorEntity):
                 "bandeira": dados.bandeira.nome,
                 "adicional_rsmwh": dados.bandeira.adicional_rsmwh,
                 "adicional_rskwh": round(dados.bandeira.adicional, 5),
+                "competencia_usada": dados.bandeira.competencia.strftime(
+                    "%Y-%m"
+                ),
+                "usou_mes_anterior": dados.bandeira.mes_anterior,
                 "mes_anterior": dados.bandeira.mes_anterior,
                 "consultado_em": (
                     dados.bandeira.consultado_em.isoformat()
