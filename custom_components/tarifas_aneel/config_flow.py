@@ -14,8 +14,9 @@ possível.
 Fluxo de opções: alíquotas de ICMS/PIS/COFINS em % (padrão 0 — o usuário
 deve conferir os valores reais na própria fatura), escolha da base do
 PIS/COFINS (sem ICMS por padrão), CIP/COSIP em R$/mês, intervalo de
-atualização em horas (mínimo 6), entidades de consumo e injeção (kWh)
-opcionais e, apenas na modalidade Branca, a janela de ponta.
+atualização em horas (mínimo 6), sensores de consumo e injeção de energia
+(device_class energy), dia da leitura do medidor (1 a 28) e, apenas na
+modalidade Branca, a janela de ponta.
 
 Cada gravação do options flow registra a data da revisão das alíquotas em
 ``aliquotas_revisadas_em``; o coordinator usa essa data no lembrete de
@@ -28,6 +29,7 @@ import logging
 from typing import Any, Final
 
 from homeassistant import config_entries
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
 from homeassistant.core import callback
 from homeassistant.helpers import selector
@@ -40,6 +42,7 @@ from custom_components.tarifas_aneel.api import (
     async_fetch_tarifa_csv,
     async_fetch_tarifa_json,
 )
+from custom_components.tarifas_aneel.ciclo import normalizar_dia
 from custom_components.tarifas_aneel.const import (
     CLASSES,
     CONF_CLASSE,
@@ -64,6 +67,8 @@ from custom_components.tarifas_aneel.const import (
     DISTRIBUTOR_NAMES,
     DISTRIBUTORS,
     DOMAIN,
+    MAX_DIA_LEITURA,
+    MIN_DIA_LEITURA,
     MIN_UPDATE_INTERVAL_HOURS,
     MODALIDADE_BRANCA,
     MODALIDADE_CONVENCIONAL,
@@ -73,6 +78,7 @@ from custom_components.tarifas_aneel.const import (
     OPT_CIP_COSIP,
     OPT_COFINS,
     OPT_CONSUMO_ENTITY_ID,
+    OPT_DIA_LEITURA,
     OPT_ICMS,
     OPT_INJECAO_ENTITY_ID,
     OPT_PIS,
@@ -146,6 +152,32 @@ def _seletor_numero(
             mode=selector.NumberSelectorMode.BOX,
         )
     )
+
+
+def _seletor_energia() -> selector.EntitySelector:
+    """Seletor de medidor de energia (sensor, device_class energy).
+
+    Aceita medidores ``state_class`` ``total`` ou ``total_increasing`` —
+    o filtro do seletor do HA 2024.10 não distingue ``state_class``, então
+    a aceitação dos dois é feita pelo cálculo da variação do ciclo.
+    """
+    return selector.EntitySelector(
+        selector.EntitySelectorConfig(
+            domain="sensor",
+            device_class=SensorDeviceClass.ENERGY,
+        )
+    )
+
+
+def _validar_entidades(consumo: Any, injecao: Any) -> str | None:
+    """Valida o par de entidades do custo estimado.
+
+    A mesma entidade não pode ser consumo e injeção ao mesmo tempo: o
+    líquido ficaria sempre zero. Devolve a chave de erro ou ``None``.
+    """
+    if consumo and injecao and str(consumo) == str(injecao):
+        return "entidades_iguais"
+    return None
 
 
 def _validar_percentuais(
@@ -324,10 +356,26 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
                 float(user_input[OPT_COFINS]),
                 sem_icms,
             )
+            if erro is None:
+                erro = _validar_entidades(
+                    user_input.get(OPT_CONSUMO_ENTITY_ID),
+                    user_input.get(OPT_INJECAO_ENTITY_ID),
+                )
             if erro is not None:
                 errors["base"] = erro
             else:
                 dados = dict(user_input)
+                for chave in (
+                    OPT_CONSUMO_ENTITY_ID,
+                    OPT_INJECAO_ENTITY_ID,
+                ):
+                    if not dados.get(chave):
+                        dados.pop(chave, None)
+                dia = dados.get(OPT_DIA_LEITURA)
+                if dia in (None, ""):
+                    dados.pop(OPT_DIA_LEITURA, None)
+                else:
+                    dados[OPT_DIA_LEITURA] = normalizar_dia(dia)
                 dados[OPT_ALIQUOTAS_REVISADAS_EM] = self._carimbo_revisao()
                 _LOGGER.debug(
                     "Opções atualizadas para a entry %s (revisão de "
@@ -349,6 +397,14 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
         encerrar o lembrete de revisão.
         """
         return dt_util.now().date().isoformat()
+
+    @staticmethod
+    def _descricao_dia_leitura(opcoes: Any) -> dict[str, Any]:
+        """Sugere o dia de leitura atual (campo opcional, pode ficar vazio)."""
+        valor = opcoes.get(OPT_DIA_LEITURA)
+        if valor in (None, ""):
+            return {}
+        return {"suggested_value": normalizar_dia(valor)}
 
     def _esquema(self) -> vol.Schema:
         """Esquema com os valores atuais como padrão.
@@ -397,16 +453,21 @@ class OptionsFlowTarifas(config_entries.OptionsFlow):
                 description={
                     "suggested_value": opcoes.get(OPT_CONSUMO_ENTITY_ID)
                 },
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
-            ),
+            ): _seletor_energia(),
             vol.Optional(
                 OPT_INJECAO_ENTITY_ID,
                 description={
                     "suggested_value": opcoes.get(OPT_INJECAO_ENTITY_ID)
                 },
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor")
+            ): _seletor_energia(),
+            vol.Optional(
+                OPT_DIA_LEITURA,
+                description=self._descricao_dia_leitura(opcoes),
+            ): _seletor_numero(
+                "dia",
+                float(MIN_DIA_LEITURA),
+                float(MAX_DIA_LEITURA),
+                1.0,
             ),
         }
         if self._entry.data.get(CONF_MODALIDADE) == MODALIDADE_BRANCA:

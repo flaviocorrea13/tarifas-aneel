@@ -42,8 +42,9 @@
           "pis_cofins_sem_icms": "PIS/COFINS calculated without ICMS in the base",
           "cip_cosip_mensal": "CIP/COSIP (R$/month)",
           "update_interval_horas": "Update interval (h)",
-          "consumo_entity_id": "Energy consumption sensor (kWh) — optional",
-          "injecao_entity_id": "Grid injection sensor (kWh) — optional",
+          "consumo_entity_id": "Grid consumption sensor (kWh)",
+          "injecao_entity_id": "Grid injection sensor (kWh)",
+          "dia_leitura": "Meter reading day",
           "ponta_inicio": "Peak start",
           "ponta_fim": "Peak end"
         },
@@ -54,8 +55,9 @@
           "pis_cofins_sem_icms": "On (recommended): PIS/COFINS is calculated on the base without ICMS. Off: uses the old formula, with all taxes on the same base.",
           "cip_cosip_mensal": "Monthly CIP/COSIP fixed cost in R$ (informational; not included in R$/kWh).",
           "update_interval_horas": "How often data is fetched from ANEEL (minimum 6 h).",
-          "consumo_entity_id": "Sensor with the month's consumption in kWh (e.g. a monthly utility_meter). Enables the estimated monthly cost.",
-          "injecao_entity_id": "Sensor with the month's energy injected into the grid (kWh). The estimate deducts compensation; without it, microgeneration is not considered.",
+          "consumo_entity_id": "Total energy drawn from the grid (kWh). Use a total meter (state_class total or total_increasing). Enables the estimated cycle cost.",
+          "injecao_entity_id": "Use the total energy exported to the grid, not the day's solar generation.",
+          "dia_leitura": "Day of the month when your utility reads the meter (1 to 28). Leave blank to use the calendar month (day 1).",
           "ponta_inicio": "Start of the peak period for your utility (White modality only).",
           "ponta_fim": "End of the peak period (White modality only)."
         }
@@ -65,7 +67,8 @@
       "icms_invalido": "ICMS must be greater than or equal to 0% and below 100%.",
       "aliquota_negativa": "PIS and COFINS cannot be negative.",
       "pis_cofins_invalidos": "PIS + COFINS must be below 100%.",
-      "soma_aliquotas": "With the old formula, ICMS + PIS + COFINS must be below 100%."
+      "soma_aliquotas": "With the old formula, ICMS + PIS + COFINS must be below 100%.",
+      "entidades_iguais": "The injection sensor must be different from the consumption sensor."
     }
   },
   "issues": {
@@ -104,8 +107,8 @@
       "custo_fixo_mensal": {
         "name": "Monthly CIP/COSIP"
       },
-      "custo_estimado_mes": {
-        "name": "Estimated monthly cost"
+      "custo_estimado_ciclo": {
+        "name": "Estimated cycle cost"
       }
     },
     "binary_sensor": {

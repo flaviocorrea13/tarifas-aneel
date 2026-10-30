@@ -27,8 +27,9 @@ pronto para usar no Home Assistant:
   momento (Ponta, Intermediário ou Fora ponta).
 - **Fallback em 3 camadas**: API JSON → CSV de dados abertos → cache
   local. Tarifa e bandeira são buscadas de forma independente.
-- **Custo estimado do mês**: opcional, calculado a partir de um sensor de
-  consumo (e, se você tiver, de um sensor de injeção).
+- **Custo estimado do ciclo**: opcional, calculado pela variação de um
+  sensor de consumo desde o dia da leitura do medidor (e, se você tiver, de
+  um sensor de injeção).
 - **Avisos no Home Assistant**: dados desatualizados e lembrete para
   revisar os impostos.
 
@@ -168,8 +169,9 @@ serviços → Tarifas ANEEL → Configurar**:
 | **PIS/COFINS calculado sem ICMS na base** | Ligado | Usa a fórmula recomendada, em que o PIS/COFINS incide sobre a base sem ICMS. Desligue apenas se quiser reproduzir a fórmula antiga. |
 | **CIP/COSIP (R$/mês)** | 0 | Valor fixo mensal da iluminação pública. É informativo e **não** entra no R$/kWh. |
 | **Intervalo de atualização (h)** | 12 | De quanto em quanto tempo a ANEEL é consultada. Mínimo de 6 horas. |
-| **Sensor de consumo (kWh)** | — | Opcional. Habilita o sensor de **custo estimado no mês**. |
-| **Sensor de injeção (kWh)** | — | Opcional. Usado para descontar a energia injetada na rede no custo estimado. |
+| **Sensor de consumo da rede (kWh)** | — | Opcional. Sensor `device_class: energy` com o total de energia consumida da rede (`state_class` `total` ou `total_increasing`). Habilita o sensor de **custo estimado no ciclo**. |
+| **Sensor de energia injetada na rede (kWh)** | — | Opcional. Use o **total de energia exportada** para a rede, não a geração solar do dia. Desconta a injeção no custo do ciclo. |
+| **Dia da leitura do medidor** | 1 | Dia do mês (1 a 28) em que a distribuidora faz a leitura. Define o ciclo do custo estimado (ex.: `10`). Em branco = mês calendário. |
 | **Início/Fim da ponta** | 17:30 / 20:30 | Só aparece na modalidade Branca. Ajuste para a janela da sua distribuidora. |
 
 Toda vez que você salva as opções, a data da revisão das alíquotas é
@@ -252,29 +254,44 @@ dispositivo.
 | `sensor..._bandeira_tarifaria` | Texto | — | Nome da bandeira (Verde, Amarela, Vermelha P1/P2, Escassez Hídrica). | `bandeira`, `adicional_rsmwh`, `adicional_rskwh`, `mes_anterior`, `consultado_em` |
 | `sensor..._posto_tarifario` | Texto | — | Posto ativo no momento. Criado apenas na modalidade Branca. | `fonte_dado` |
 | `sensor..._cip_cosip_mensal` | Monetário | R$/mês | CIP/COSIP configurada. Não entra no R$/kWh. | — |
-| `sensor..._custo_estimado_mes` | Monetário | R$/mês | Estimativa: consumo líquido × tarifa final + CIP/COSIP. Criado apenas se houver sensor de consumo. | `consumo_kwh`, `injecao_kwh`, `consumo_liquido_kwh`, `tarifa_final`, `cip_cosip_mensal`, `compensacao_considerada` |
+| `sensor..._custo_estimado_ciclo` | Monetário | R$ | Estimativa do ciclo de leitura: consumo líquido × tarifa final + CIP/COSIP. Criado apenas se houver sensor de consumo. | `dia_leitura`, `ciclo_inicio`, `ciclo_fim`, `consumo_kwh`, `injecao_kwh`, `consumo_liquido_kwh`, `tarifa_final`, `cip_cosip`, `reset_detectado`, `compensacao_considerada`, `creditos_nao_considerados` |
 | `binary_sensor..._dados_desatualizados` | Problema (ligado/desligado) | — | Ligado quando a última atualização real tem mais de **3 dias** ou nunca chegou dado real. | `fonte_dado` |
 | `button..._atualizar_agora` | Botão | — | Força uma atualização imediata do coordinator. | — |
 
 Os sensores de preço usam `state_class: measurement` e unidade
 `BRL/kWh`, sem `device_class`, para que o painel de Energia trate o valor
-como preço pontual. Os sensores de custo mensal usam
-`device_class: monetary`.
+como preço pontual. O sensor de custo estimado usa
+`device_class: monetary` e `state_class: total`, com `last_reset` no
+início do ciclo.
 
-### 6.1 Custo estimado do mês
+### 6.1 Custo estimado do ciclo de leitura
 
 O sensor de custo estimado só é criado quando você informa um **sensor de
-consumo** nas opções. O cálculo é:
+consumo** nas opções. O consumo do ciclo é a **variação** do medidor
+totalizador desde o início do ciclo — não o valor absoluto do medidor:
 
 ```text
-consumo_líquido = max(consumo - injeção, 0)
-custo_estimado = consumo_líquido * tarifa_final + CIP/COSIP
+consumo_líquido = max(consumo_do_ciclo - injeção_do_ciclo, 0)
+custo_estimado  = consumo_líquido * tarifa_final + CIP/COSIP
 ```
 
-O sensor de consumo deve representar o **consumo do mês** (por exemplo, um
-`utility_meter` com ciclo mensal). Se você não informar um sensor de
-injeção, a integração **não considera compensação de microgeração** — o
-custo é calculado sobre o consumo inteiro.
+O ciclo começa no **dia da leitura do medidor** (1 a 28; em branco = dia 1,
+ou seja, mês calendário) e termina no dia anterior à leitura seguinte. Se
+o medidor "volta" (reset, troca de equipamento ou rollover), a integração
+detecta o reset, zera a baseline e recomeça a contagem a partir do valor
+atual — o atributo `reset_detectado` fica ligado no ciclo.
+
+Os sensores de consumo e injeção devem ser `device_class: energy` com
+`state_class` `total` ou `total_increasing` (medidores acumulados). O
+sensor de injeção deve ser o **total exportado para a rede**, não a
+geração solar do dia.
+
+> **Estimativa, não fatura.** O valor é uma aproximação para acompanhar o
+> gasto ao longo do ciclo. **Créditos de ciclos anteriores (saldo
+> acumulado de GD) não são considerados**: a injeção só abate o consumo do
+> próprio ciclo e o excedente não vira crédito. A fatura real também pode
+> incluir demanda, reativos, juros, multas e outros itens não modelados.
+> O atributo `creditos_nao_considerados` fica sempre `true`.
 
 ---
 
@@ -463,7 +480,12 @@ Isso é esperado em alguns casos. Confira:
 - **Consumo x demanda**: o painel de Energia usa kWh. Faturas de Grupo A
   também cobram demanda (kW), que não é considerada aqui.
 - **Microgeração**: sem um sensor de injeção configurado, a compensação
-  não é considerada no custo estimado.
+  não é considerada no custo do ciclo. Mesmo com o sensor, **créditos de
+  ciclos anteriores (saldo de GD) não entram na conta** — a injeção só
+  abate o consumo do próprio ciclo.
+- **Ciclo de leitura**: se o dia da leitura estiver errado, o custo
+  estimado cobre o período errado. Confira a data de leitura na fatura e
+  ajuste o campo **Dia da leitura do medidor**.
 
 Se depois de conferir tudo o valor continuar estranho, exporte o
 diagnóstico em **Configurações → Dispositivos e serviços → Tarifas ANEEL

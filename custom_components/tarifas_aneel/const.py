@@ -146,6 +146,9 @@ OPT_CIP_COSIP: Final = "cip_cosip_mensal"
 OPT_UPDATE_INTERVAL: Final = "update_interval_horas"
 OPT_CONSUMO_ENTITY_ID: Final = "consumo_entity_id"
 OPT_INJECAO_ENTITY_ID: Final = "injecao_entity_id"
+# Dia do mês em que a distribuidora faz a leitura do medidor (1 a 28).
+# Define o ciclo do custo estimado. Ausente = dia 1 (mês calendário).
+OPT_DIA_LEITURA: Final = "dia_leitura"
 # Data (ISO) em que as alíquotas foram salvas pela última vez. Usada pelo
 # lembrete de revisão de impostos (repair issue não bloqueante).
 OPT_ALIQUOTAS_REVISADAS_EM: Final = "aliquotas_revisadas_em"
@@ -163,6 +166,10 @@ DEFAULT_PIS: Final = 0.0
 DEFAULT_COFINS: Final = 0.0
 DEFAULT_PIS_COFINS_SEM_ICMS: Final = True
 DEFAULT_CIP_COSIP: Final = 0.0
+DEFAULT_DIA_LEITURA: Final = 1
+MIN_DIA_LEITURA: Final = 1
+# 28 evita o dia inexistente em fevereiro e o "pulo" de fim de mês.
+MAX_DIA_LEITURA: Final = 28
 DEFAULT_UPDATE_INTERVAL_HOURS: Final = 12
 MIN_UPDATE_INTERVAL_HOURS: Final = 6
 DEFAULT_DETALHE: Final = NAO_SE_APLICA
@@ -186,6 +193,9 @@ RSMWH_PARA_RSKWH: Final = 1000.0
 REQUEST_TIMEOUT: Final = 30
 STORE_KEY: Final = "tarifas_aneel_cache"
 STORE_VERSION: Final = 1
+# Baseline do ciclo de leitura (sensores de consumo/injeção), por entry.
+STORE_KEY_CICLO: Final = "tarifas_aneel_ciclo"
+STORE_VERSION_CICLO: Final = 1
 # Abre repair issue se ficar mais de 7 dias apenas com cache.
 REPAIR_CACHE_MAX_AGE_DAYS: Final = 7
 # Lembrete não bloqueante de revisão de impostos a cada 60 dias (ou quando
@@ -209,6 +219,16 @@ ATTR_ALIQUOTAS_REVISADAS_EM: Final = "aliquotas_revisadas_em"
 ATTR_PIS_COFINS_SEM_ICMS: Final = "pis_cofins_sem_icms"
 ATTR_POSTO_TARIFARIO: Final = "posto_tarifario"
 ATTR_TARIFA_POR_POSTO: Final = "tarifa_por_posto"
+# Atributos do custo estimado por ciclo de leitura.
+ATTR_DIA_LEITURA: Final = "dia_leitura"
+ATTR_CICLO_INICIO: Final = "ciclo_inicio"
+ATTR_CICLO_FIM: Final = "ciclo_fim"
+ATTR_CONSUMO_KWH: Final = "consumo_kwh"
+ATTR_INJECAO_KWH: Final = "injecao_kwh"
+ATTR_CONSUMO_LIQUIDO_KWH: Final = "consumo_liquido_kwh"
+ATTR_RESET_DETECTADO: Final = "reset_detectado"
+ATTR_COMPENSACAO_CONSIDERADA: Final = "compensacao_considerada"
+ATTR_CREDITOS_NAO_CONSIDERADOS: Final = "creditos_nao_considerados"
 
 DEVICE_MANUFACTURER: Final = "ANEEL"
 

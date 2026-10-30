@@ -40,7 +40,7 @@ from typing import Any, Final
 
 from dateutil.relativedelta import relativedelta
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import (
@@ -71,7 +71,9 @@ from custom_components.tarifas_aneel.const import (
     MODALIDADE_BRANCA,
     OPT_ALIQUOTAS_REVISADAS_EM,
     OPT_COFINS,
+    OPT_CONSUMO_ENTITY_ID,
     OPT_ICMS,
+    OPT_INJECAO_ENTITY_ID,
     OPT_PIS,
     OPT_PIS_COFINS_SEM_ICMS,
     OPT_PONTA_FIM,
@@ -186,10 +188,55 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
         self._store: Store[dict[str, Any]] = Store(
             hass, STORE_VERSION, f"{STORE_KEY}_{entry.entry_id}"
         )
+        # Entidades que, ao mudar, exigem recriar a plataforma de sensores
+        # (o sensor de custo existe apenas com consumo configurado).
+        self._opcoes_entidades = self._entidades_opcoes()
 
     # ------------------------------------------------------------------
     # Configuração
     # ------------------------------------------------------------------
+    def _entidades_opcoes(self) -> tuple[str | None, str | None]:
+        """Entidades de consumo e injeção configuradas nas opções."""
+        opcoes = self._entry.options
+        consumo = opcoes.get(OPT_CONSUMO_ENTITY_ID)
+        injecao = opcoes.get(OPT_INJECAO_ENTITY_ID)
+        return (
+            str(consumo) if consumo else None,
+            str(injecao) if injecao else None,
+        )
+
+    @property
+    def opcoes_entidades_alteradas(self) -> bool:
+        """True se consumo/injeção mudaram desde o último recálculo."""
+        return self._entidades_opcoes() != self._opcoes_entidades
+
+    @callback
+    def aplicar_opcoes(self) -> None:
+        """Recalcula com os dados em memória, sem chamadas de rede.
+
+        As alíquotas, a CIP/COSIP, o intervalo e a janela de ponta não
+        mudam os dados publicados pela ANEEL: basta refazer o cálculo
+        sobre a tarifa e a bandeira já carregadas. O intervalo de
+        atualização também é reaplicado (sem recarregar a entry).
+        """
+        self.update_interval = timedelta(
+            hours=self._intervalo_horas(self._entry.options)
+        )
+        self._opcoes_entidades = self._entidades_opcoes()
+        dados = self.data
+        if dados is None or (dados.tarifa is None and dados.bandeira is None):
+            return
+        self.async_set_updated_data(
+            replace(
+                dados,
+                calculos=self._calcular_postos(dados.tarifa, dados.bandeira),
+            )
+        )
+        _LOGGER.debug(
+            "Opções reaplicadas em memória para %s (sem chamada de rede)",
+            self._filtro.distribuidora,
+        )
+
     @staticmethod
     def _intervalo_horas(opcoes: Any) -> int:
         try:
@@ -296,20 +343,70 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             else (cache.ultima_atualizacao_real if cache else None)
         )
 
-        dados = DadosAneel(
-            filtro=self._filtro,
-            tarifa=tarifa,
-            bandeira=bandeira,
-            fonte_tarifa=fonte_tarifa,
-            fonte_bandeira=fonte_bandeira,
-            ultima_atualizacao_real=ultima_real,
-            calculos=self._calcular_postos(tarifa, bandeira),
+        dados = self._montar_dados(
+            tarifa,
+            bandeira,
+            fonte_tarifa,
+            fonte_bandeira,
+            ultima_real,
         )
         await self._async_gerenciar_repair(dados, agora)
         await self._async_gerenciar_revisao_impostos(dados)
         if teve_dado_real:
             await self._async_salvar_cache(dados)
         return dados
+
+    def _montar_dados(
+        self,
+        tarifa: TarifaData | None,
+        bandeira: BandeiraData | None,
+        fonte_tarifa: FonteDado | None,
+        fonte_bandeira: FonteDado | None,
+        ultima_atualizacao_real: datetime | None,
+    ) -> DadosAneel:
+        """Monta o payload publicado (dados + cálculos por posto)."""
+        return DadosAneel(
+            filtro=self._filtro,
+            tarifa=tarifa,
+            bandeira=bandeira,
+            fonte_tarifa=fonte_tarifa,
+            fonte_bandeira=fonte_bandeira,
+            ultima_atualizacao_real=ultima_atualizacao_real,
+            calculos=self._calcular_postos(tarifa, bandeira),
+        )
+
+    async def async_carregar_cache_inicial(self) -> bool:
+        """Publica o cache persistente (se houver) sem tocar na rede.
+
+        Chamado no setup antes das plataformas: as entidades já nascem com
+        os últimos dados conhecidos, marcados com ``fonte_dado = Cache``.
+        A busca real roda depois, em segundo plano. Devolve ``True`` quando
+        havia cache válido para publicar.
+        """
+        cache = await self._async_carregar_cache()
+        if cache is None or (
+            cache.tarifa is None and cache.bandeira is None
+        ):
+            return False
+        agora = dt_util.utcnow()
+        dados = self._montar_dados(
+            cache.tarifa,
+            cache.bandeira,
+            FonteDado.CACHE,
+            FonteDado.CACHE,
+            cache.ultima_atualizacao_real,
+        )
+        await self._async_gerenciar_repair(dados, agora)
+        await self._async_gerenciar_revisao_impostos(dados)
+        self.async_set_updated_data(dados)
+        _LOGGER.debug(
+            "Cache publicado no setup para %s (tarifa=%s, bandeira=%s); "
+            "busca real seguirá em segundo plano",
+            self._filtro.distribuidora,
+            dados.tarifa is not None,
+            dados.bandeira is not None,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Tarifa (3 camadas)

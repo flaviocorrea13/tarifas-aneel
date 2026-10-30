@@ -16,7 +16,8 @@ painel de Energia.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+import logging
 from typing import Any, Final
 
 from homeassistant.components.sensor import (
@@ -31,17 +32,39 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from custom_components.tarifas_aneel.ciclo import (
+    LeituraCiclo,
+    atualizar_leitura,
+    calcular_custo_ciclo,
+    delta_kwh,
+    fim_ciclo,
+    inicio_ciclo,
+    normalizar_dia,
+)
 from custom_components.tarifas_aneel.const import (
+    ATTR_CICLO_FIM,
+    ATTR_CICLO_INICIO,
+    ATTR_COMPENSACAO_CONSIDERADA,
+    ATTR_CONSUMO_KWH,
+    ATTR_CONSUMO_LIQUIDO_KWH,
+    ATTR_CREDITOS_NAO_CONSIDERADOS,
+    ATTR_DIA_LEITURA,
+    ATTR_INJECAO_KWH,
     ATTR_POSTO_TARIFARIO,
+    ATTR_RESET_DETECTADO,
     ATTR_TARIFA_POR_POSTO,
     CONF_MODALIDADE,
     DEFAULT_CIP_COSIP,
     MODALIDADE_BRANCA,
     OPT_CIP_COSIP,
     OPT_CONSUMO_ENTITY_ID,
+    OPT_DIA_LEITURA,
     OPT_INJECAO_ENTITY_ID,
+    STORE_KEY_CICLO,
+    STORE_VERSION_CICLO,
     UNIT_PRECO_ENERGIA,
     UNIT_REAIS,
 )
@@ -53,6 +76,13 @@ from custom_components.tarifas_aneel.models import ResultadoCalculo
 # 5 min garante que o estado troque perto da virada (a troca em si só
 # acontece quando o posto realmente muda).
 INTERVALO_POSTO: Final = timedelta(minutes=5)
+# O ciclo de leitura vira à meia-noite; a verificação horária garante a
+# rotação da baseline mesmo sem mudança nos sensores.
+INTERVALO_CICLO: Final = timedelta(hours=1)
+# Debounce da persistência do baseline (segundos).
+ATRASO_SAVE_CICLO: Final = 5.0
+
+_LOGGER: Final = logging.getLogger(__name__)
 
 
 class TarifaSensor(AneelBaseEntity, SensorEntity):
@@ -365,32 +395,47 @@ class CustoFixoMensalSensor(AneelBaseEntity, SensorEntity):
             return DEFAULT_CIP_COSIP
 
 
-class CustoEstimadoMesSensor(AneelBaseEntity, SensorEntity):
-    """Estimativa do custo mensal a partir do consumo informado.
+class CustoEstimadoCicloSensor(AneelBaseEntity, SensorEntity):
+    """Estimativa do custo do ciclo de leitura atual (R$).
 
-    ``consumo_liquido = max(consumo - injecao, 0)``; o custo é
-    ``consumo_liquido x tarifa_final + CIP/COSIP``. A entidade de consumo
-    deve ser um medidor com o consumo do mês (por exemplo, um
-    ``utility_meter`` com ciclo mensal). Sem entidade de injeção, a
-    compensação de microgeração não é considerada.
+    O ciclo começa no dia de leitura configurado (1 a 28; ausente = dia 1,
+    ou seja, mês calendário). O consumo é a **variação** dos sensores
+    totalizadores desde o início do ciclo, não o valor absoluto do
+    medidor:
+
+    ``consumo_liquido = max(delta_consumo - delta_injecao, 0)``
+    ``custo = consumo_liquido x tarifa_final + CIP/COSIP``
+
+    Um medidor que volta (reset/rollover) tem a baseline zerada. Créditos
+    acumulados de ciclos anteriores (saldo de GD) não são considerados.
     """
 
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = UNIT_REAIS
     _attr_state_class = SensorStateClass.TOTAL
     _attr_icon = "mdi:calculator"
-    _attr_translation_key = "custo_estimado_mes"
+    _attr_translation_key = "custo_estimado_ciclo"
 
     def __init__(
         self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
     ) -> None:
-        """Inicializa a estimativa e o rastreio das entidades de origem."""
-        super().__init__(coordinator, entry, "custo_estimado_mes")
-        self._cancelar: Callable[[], None] | None = None
+        """Inicializa a estimativa, a baseline e o rastreio das origens."""
+        super().__init__(coordinator, entry, "custo_estimado_ciclo")
+        self._store: Store[dict[str, Any]] = Store(
+            self.coordinator.hass,
+            STORE_VERSION_CICLO,
+            f"{STORE_KEY_CICLO}_{entry.entry_id}",
+        )
+        self._consumo: LeituraCiclo | None = None
+        self._injecao: LeituraCiclo | None = None
+        self._cancelar_estado: Callable[[], None] | None = None
+        self._cancelar_relogio: Callable[[], None] | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Reavalia quando o consumo ou a injeção mudam."""
+        """Carrega a baseline persistida e passa a acompanhar as origens."""
         await super().async_added_to_hass()
+        await self._async_carregar_baseline()
+        self._recalcular()
         ids = [
             str(valor)
             for valor in (
@@ -400,23 +445,40 @@ class CustoEstimadoMesSensor(AneelBaseEntity, SensorEntity):
             if valor
         ]
         if ids:
-            self._cancelar = async_track_state_change_event(
+            self._cancelar_estado = async_track_state_change_event(
                 self.hass, ids, self._ao_mudar_origem
             )
+        self._cancelar_relogio = async_track_time_interval(
+            self.hass, self._ao_mudar_relogio, INTERVALO_CICLO
+        )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Cancela o rastreio das entidades de origem."""
-        if self._cancelar is not None:
-            self._cancelar()
-            self._cancelar = None
+        """Cancela o rastreio e grava a baseline final."""
+        if self._cancelar_estado is not None:
+            self._cancelar_estado()
+            self._cancelar_estado = None
+        if self._cancelar_relogio is not None:
+            self._cancelar_relogio()
+            self._cancelar_relogio = None
+        await self._store.async_save(self._payload())
 
     @callback
     def _ao_mudar_origem(self, event: Any) -> None:
-        """Reescreve o estado quando consumo/injeção mudam."""
+        """Reavalia a estimativa quando consumo/injeção mudam."""
+        self._recalcular()
         self.async_write_ha_state()
 
-    def _estado_kwh(self, chave: str) -> float | None:
-        """Lê o estado numérico (kWh) de uma entidade configurada."""
+    @callback
+    def _ao_mudar_relogio(self, agora: datetime) -> None:
+        """Reavalia a cada hora (rotação do ciclo e baseline)."""
+        self._recalcular()
+        self.async_write_ha_state()
+
+    # ------------------------------------------------------------------
+    # Leitura dos medidores e baseline
+    # ------------------------------------------------------------------
+    def _valor_kwh(self, chave: str) -> float | None:
+        """Lê o valor numérico (kWh) de uma entidade configurada."""
         entity_id = self._entry.options.get(chave)
         if not entity_id:
             return None
@@ -428,6 +490,76 @@ class CustoEstimadoMesSensor(AneelBaseEntity, SensorEntity):
         except (TypeError, ValueError):
             return None
 
+    def _dia_leitura(self) -> int:
+        """Dia de leitura normalizado (1..28; ausente = 1)."""
+        return normalizar_dia(self._entry.options.get(OPT_DIA_LEITURA))
+
+    def _ciclo_atual(self) -> date:
+        """Início do ciclo de leitura que contém hoje."""
+        return inicio_ciclo(dt_util.now().date(), self._dia_leitura())
+
+    def _recalcular(
+        self,
+    ) -> tuple[date, LeituraCiclo | None, LeituraCiclo | None]:
+        """Atualiza as leituras do ciclo e devolve o estado corrente."""
+        inicio = self._ciclo_atual()
+        consumo = self._valor_kwh(OPT_CONSUMO_ENTITY_ID)
+        if consumo is not None:
+            self._consumo = atualizar_leitura(self._consumo, consumo, inicio)
+        injecao = self._valor_kwh(OPT_INJECAO_ENTITY_ID)
+        if injecao is not None:
+            self._injecao = atualizar_leitura(self._injecao, injecao, inicio)
+        if self._consumo is not None or self._injecao is not None:
+            self._agendar_save()
+        return inicio, self._consumo, self._injecao
+
+    def _payload(self) -> dict[str, Any]:
+        """Conteúdo persistido (baseline por entidade e por ciclo)."""
+        return {
+            "consumo_entity": self._entry.options.get(OPT_CONSUMO_ENTITY_ID),
+            "injecao_entity": self._entry.options.get(OPT_INJECAO_ENTITY_ID),
+            "consumo": self._consumo.to_dict() if self._consumo else None,
+            "injecao": self._injecao.to_dict() if self._injecao else None,
+        }
+
+    def _agendar_save(self) -> None:
+        """Agenda a persistência da baseline (com debounce)."""
+        self._store.async_delay_save(self._payload, ATRASO_SAVE_CICLO)
+
+    async def _async_carregar_baseline(self) -> None:
+        """Recompõe a baseline persistida; descarta se a entidade mudou."""
+        dados = await self._store.async_load()
+        if not isinstance(dados, dict):
+            return
+        if dados.get("consumo_entity") != self._entry.options.get(
+            OPT_CONSUMO_ENTITY_ID
+        ):
+            _LOGGER.debug("Baseline do ciclo ignorada: sensor de consumo mudou")
+            return
+        try:
+            self._consumo = (
+                LeituraCiclo.from_dict(dados["consumo"])
+                if dados.get("consumo")
+                else None
+            )
+            if dados.get("injecao_entity") == self._entry.options.get(
+                OPT_INJECAO_ENTITY_ID
+            ):
+                self._injecao = (
+                    LeituraCiclo.from_dict(dados["injecao"])
+                    if dados.get("injecao")
+                    else None
+                )
+        except (KeyError, TypeError, ValueError) as err:
+            _LOGGER.warning(
+                "Baseline do ciclo corrompida, será reconstruída: %s", err
+            )
+            self._consumo = None
+            self._injecao = None
+
+    # ------------------------------------------------------------------
+    # Cálculo exposto
+    # ------------------------------------------------------------------
     def _calculo_atual(self) -> ResultadoCalculo | None:
         """Cálculo do posto ativo (fallback: primeiro posto)."""
         dados = self._dados
@@ -451,48 +583,72 @@ class CustoEstimadoMesSensor(AneelBaseEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Disponível quando há consumo e cálculo de tarifa."""
+        """Disponível apenas com o sensor de consumo e a tarifa carregados."""
         return (
             super().available
-            and self._estado_kwh(OPT_CONSUMO_ENTITY_ID) is not None
+            and self._valor_kwh(OPT_CONSUMO_ENTITY_ID) is not None
             and self._calculo_atual() is not None
         )
 
     @property
+    def last_reset(self) -> datetime | None:
+        """Início do ciclo atual (interpretação de ``state_class: total``)."""
+        if self._consumo is None:
+            return None
+        return dt_util.start_of_local_day(self._consumo.inicio)
+
+    @property
     def native_value(self) -> float | None:
-        """Custo estimado do mês (R$), com consumo líquido."""
-        consumo = self._estado_kwh(OPT_CONSUMO_ENTITY_ID)
+        """Custo estimado do ciclo (R$), com consumo líquido."""
+        inicio, consumo, injecao = self._recalcular()
         calculo = self._calculo_atual()
         if consumo is None or calculo is None:
             return None
-        injecao = self._estado_kwh(OPT_INJECAO_ENTITY_ID) or 0.0
-        liquido = max(consumo - injecao, 0.0)
-        return round(liquido * calculo.tarifa_final + self._cip_cosip(), 2)
+        return calcular_custo_ciclo(
+            delta_kwh(consumo, inicio),
+            delta_kwh(injecao, inicio),
+            calculo.tarifa_final,
+            self._cip_cosip(),
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Memória de cálculo da estimativa."""
+        """Memória de cálculo e período do ciclo estimado."""
         dados = self._dados
         attrs = self._atributos_padrao(
             dados.fonte_tarifa if dados is not None else None
         )
-        consumo = self._estado_kwh(OPT_CONSUMO_ENTITY_ID)
-        injecao = self._estado_kwh(OPT_INJECAO_ENTITY_ID)
+        inicio, consumo, injecao = self._recalcular()
         calculo = self._calculo_atual()
+        consumo_kwh = delta_kwh(consumo, inicio)
+        injecao_kwh = delta_kwh(injecao, inicio)
+        dia = self._dia_leitura()
         attrs.update(
             {
-                "consumo_kwh": consumo,
-                "injecao_kwh": injecao,
-                "consumo_liquido_kwh": (
-                    max((consumo or 0.0) - (injecao or 0.0), 0.0)
-                    if consumo is not None
-                    else None
+                ATTR_DIA_LEITURA: dia,
+                ATTR_CICLO_INICIO: inicio.isoformat(),
+                ATTR_CICLO_FIM: fim_ciclo(inicio, dia).isoformat(),
+                ATTR_CONSUMO_KWH: round(consumo_kwh, 3),
+                ATTR_INJECAO_KWH: round(injecao_kwh, 3),
+                ATTR_CONSUMO_LIQUIDO_KWH: round(
+                    max(consumo_kwh - injecao_kwh, 0.0), 3
                 ),
                 "tarifa_final": (
                     round(calculo.tarifa_final, 5) if calculo else None
                 ),
-                "cip_cosip_mensal": self._cip_cosip(),
-                "compensacao_considerada": injecao is not None,
+                "cip_cosip": self._cip_cosip(),
+                ATTR_RESET_DETECTADO: bool(
+                    (consumo is not None and consumo.reset)
+                    or (injecao is not None and injecao.reset)
+                ),
+                ATTR_COMPENSACAO_CONSIDERADA: self._injecao is not None,
+                ATTR_CREDITOS_NAO_CONSIDERADOS: True,
+                "entidade_consumo": self._entry.options.get(
+                    OPT_CONSUMO_ENTITY_ID
+                ),
+                "entidade_injecao": self._entry.options.get(
+                    OPT_INJECAO_ENTITY_ID
+                ),
             }
         )
         return attrs
@@ -517,5 +673,5 @@ async def async_setup_entry(
     if entry.data.get(CONF_MODALIDADE) == MODALIDADE_BRANCA:
         entidades.append(PostoTarifarioSensor(coordinator, entry))
     if entry.options.get(OPT_CONSUMO_ENTITY_ID):
-        entidades.append(CustoEstimadoMesSensor(coordinator, entry))
+        entidades.append(CustoEstimadoCicloSensor(coordinator, entry))
     async_add_entities(entidades)
