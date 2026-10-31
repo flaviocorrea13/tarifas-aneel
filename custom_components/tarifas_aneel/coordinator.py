@@ -32,6 +32,7 @@ Estratégia de atualização (a cada 12 h por padrão, mínimo 6 h):
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
@@ -101,6 +102,11 @@ REPAIR_ISSUE_REVISAO: Final = "revisao_impostos"
 
 MINUTOS_EM_UMA_HORA: Final = 60
 MINUTOS_EM_UM_DIA: Final = 1440
+
+# Backoff da busca real disparada em segundo plano depois de publicar o
+# cache. Se a rede estiver fora, não espera o update_interval inteiro:
+# tenta de novo em 5, 15 e 60 minutos.
+BACKOFF_MINUTOS: Final = (5, 15, 60)
 
 
 @dataclass
@@ -407,6 +413,51 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             dados.bandeira is not None,
         )
         return True
+
+    async def async_refresh_com_backoff(self) -> None:
+        """Busca real com retentativas em 5, 15 e 60 minutos.
+
+        Executado como tarefa de segundo plano logo depois de publicar o
+        cache: se a primeira busca falhar, tenta novamente sem esperar o
+        ``update_interval`` inteiro. A tarefa é cancelada pelo HA no
+        unload da entry.
+
+        ``last_update_success`` sozinho não basta: com cache válido o
+        coordinator publica o cache e continua "com sucesso" mesmo sem
+        rede. Por isso a retentativa considera se alguma fonte REAL
+        (API/CSV) foi usada.
+        """
+        await self.async_refresh()
+        for minutos in BACKOFF_MINUTOS:
+            if self._busca_real_bem_sucedida():
+                return
+            _LOGGER.debug(
+                "Busca real falhou para %s; nova tentativa em %s min",
+                self._filtro.distribuidora,
+                minutos,
+            )
+            await asyncio.sleep(minutos * MINUTOS_EM_UMA_HORA)
+            if self._busca_real_bem_sucedida():
+                # Outra atualização (ex.: update_interval) já trouxe dado
+                # real enquanto esta tarefa esperava.
+                return
+            await self.async_refresh()
+
+    def _busca_real_bem_sucedida(self) -> bool:
+        """Houve atualização bem-sucedida com dado real (API ou CSV)?"""
+        return self.last_update_success and self.tem_fonte_real
+
+    @property
+    def tem_fonte_real(self) -> bool:
+        """O payload atual veio de API ou CSV (não apenas do cache)?"""
+        dados = self.data
+        if dados is None:
+            return False
+        fontes_reais = (FonteDado.API, FonteDado.CSV)
+        return (
+            dados.fonte_tarifa in fontes_reais
+            or dados.fonte_bandeira in fontes_reais
+        )
 
     # ------------------------------------------------------------------
     # Tarifa (3 camadas)

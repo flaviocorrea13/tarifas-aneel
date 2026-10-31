@@ -27,6 +27,10 @@ pronto para usar no Home Assistant:
   momento (Ponta, Intermediário ou Fora ponta).
 - **Fallback em 3 camadas**: API JSON → CSV de dados abertos → cache
   local. Tarifa e bandeira são buscadas de forma independente.
+- **Inicialização rápida**: o cache é publicado na hora e a busca real
+  roda em segundo plano; se a rede falhar, tenta de novo em 5, 15 e 60
+  minutos. Ao recarregar por opções, a fonte original é preservada e só o
+  cálculo muda.
 - **Custo estimado do ciclo**: opcional, calculado pela variação de um
   sensor de consumo desde o dia da leitura do medidor (e, se você tiver, de
   um sensor de injeção).

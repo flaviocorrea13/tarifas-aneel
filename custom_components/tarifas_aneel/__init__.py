@@ -11,13 +11,15 @@ subclasse + modalidade + detalhe). O coordinator vive em
 
 Inicialização rápida: o cache persistente é publicado antes das
 plataformas (``fonte_dado = Cache``) e a busca real (API -> CSV) roda em
-segundo plano, sem segurar o setup. Só na primeira instalação, sem cache,
-o setup espera ``async_config_entry_first_refresh``.
+segundo plano, sem segurar o setup, com retentativas em 5, 15 e 60
+minutos se a rede falhar. Só na primeira instalação, sem cache, o setup
+espera ``async_config_entry_first_refresh``.
 
 Mudanças de opções que não trocam as entidades de consumo/injeção são
 reaplicadas em memória (sem rede e sem recarregar a entry). Quando as
 entidades mudam, a entry é recarregada — o coordinator reaproveita o
-último payload em memória, então o reload também não faz chamadas HTTP.
+último payload em memória, preserva a fonte original (``status_api`` não
+vira ``Cache``) e só recalcula com as opções novas, sem chamadas HTTP.
 """
 
 from __future__ import annotations
@@ -81,6 +83,19 @@ def _retirar_dados_reload(
     return dados if isinstance(dados, DadosAneel) else None
 
 
+def _agendar_busca_real(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: AneelTarifasCoordinator,
+) -> None:
+    """Agenda a busca real em segundo plano, com backoff de rede."""
+    entry.async_create_background_task(
+        hass,
+        coordinator.async_refresh_com_backoff(),
+        f"{DOMAIN}_refresh_{entry.entry_id}",
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Configura a entry: coordinator + plataformas."""
     coordinator = AneelTarifasCoordinator(hass, entry, _filtro_da_entry(entry))
@@ -89,20 +104,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     dados_reload = _retirar_dados_reload(hass, entry.entry_id)
     if dados_reload is not None:
         # Reload (ex.: troca das entidades de consumo/injeção): reaproveita
-        # o payload em memória e não chama a ANEEL.
+        # o payload em memória, preserva a fonte original (API/CSV/Cache)
+        # e apenas recalcula com as opções novas — sem chamadas HTTP.
         coordinator.async_set_updated_data(dados_reload)
+        coordinator.aplicar_opcoes()
         _LOGGER.debug(
-            "Payload em memória reaproveitado no setup de %s (sem rede)",
+            "Payload em memória reaproveitado no setup de %s (fonte %s, "
+            "sem rede)",
             entry.entry_id,
+            dados_reload.fonte_tarifa,
         )
+        if not coordinator.tem_fonte_real:
+            # O payload reaproveitado era só cache (opções mudaram antes de
+            # a busca real terminar): agenda a atualização real agora, para
+            # o status_api não ficar preso em Cache até o update_interval.
+            _agendar_busca_real(hass, entry, coordinator)
     elif await coordinator.async_carregar_cache_inicial():
         # Cache publicado: as entidades já nascem com dado; a busca real
-        # roda em segundo plano e atualiza o estado ao terminar.
-        entry.async_create_background_task(
-            hass,
-            coordinator.async_refresh(),
-            f"{DOMAIN}_refresh_{entry.entry_id}",
-        )
+        # roda em segundo plano, com retentativas em 5/15/60 min se a
+        # rede falhar.
+        _agendar_busca_real(hass, entry, coordinator)
     else:
         # Primeira instalação (sem cache): mantém o comportamento antigo.
         # Se as 3 camadas falharem, o HA entra em retry com backoff.
