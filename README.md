@@ -1,7 +1,7 @@
 # Tarifas ANEEL — integração para o Home Assistant
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
-![Versão](https://img.shields.io/badge/vers%C3%A3o-1.0.0-blue.svg)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-1.2.0-blue.svg)
 [![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-green.svg)](LICENSE)
 
 Consulta TUSD, TE e bandeiras tarifárias da ANEEL e mostra quanto você paga
@@ -583,6 +583,8 @@ Contribuições são bem-vindas:
 O CI roda ruff, hassfest e a validação do HACS a cada push/PR, além da
 suíte de testes em matriz: Home Assistant 2024.10 (Python 3.12) e a
 versão estável suportada pelo plugin (Python 3.14).
+
+O histórico de versões está em [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
