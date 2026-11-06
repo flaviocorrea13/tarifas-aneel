@@ -265,13 +265,20 @@ conforme o nome do dispositivo.
 | `sensor..._vigencia_fim` | Data | — | Fim da vigência (indisponível quando a vigência é aberta). | `fonte_dado` |
 | `sensor..._fonte_dado_tarifa` | Diagnóstico | — | Origem da tarifa: `API`, `CSV` ou `Cache`. | — |
 | `sensor..._fonte_dado_bandeira` | Diagnóstico | — | Origem da bandeira: `API`, `CSV` ou `Cache`. | — |
-| `sensor..._ultima_atualizacao_sucesso` | Diagnóstico (timestamp) | — | Última vez em que a ANEEL entregou dado real. | `fonte_tarifa`, `fonte_bandeira` |
+| `sensor..._ultima_atualizacao_sucesso` | Diagnóstico (timestamp) | — | Última vez em que a ANEEL entregou dado real. | `fonte_tarifa`, `fonte_bandeira`, `ultimo_erro`, `ultima_atualizacao_sucesso` |
+| `sensor..._idade_dado` | Diagnóstico (dias) | dias | Quanto tempo passou desde a última atualização real. Indisponível se nunca houve dado real. | `fonte_dado` |
 | `sensor..._cip_cosip_mensal` | Monetário | R$/mês | CIP/COSIP configurada. Não entra no R$/kWh. | — |
 | `sensor..._custo_estimado_ciclo` | Monetário | R$ | Estimativa do ciclo de leitura: consumo líquido × tarifa final + CIP/COSIP. Criado apenas se houver sensor de consumo. | `dia_leitura`, `ciclo_inicio`, `ciclo_fim`, `consumo_kwh`, `injecao_kwh`, `consumo_liquido_kwh`, `tarifa_final`, `cip_cosip`, `reset_detectado`, `compensacao_considerada`, `creditos_nao_considerados` |
 | `binary_sensor..._dados_desatualizados` | Problema (ligado/desligado) | — | Ligado quando a última atualização real tem mais de **3 dias** ou nunca chegou dado real. | `fonte_dado` |
 | `binary_sensor..._status_api` | Conectividade | — | Ligado quando tarifa **e** bandeira vieram da API (tempo real); CSV/cache desligam. | `fonte_tarifa`, `fonte_bandeira` |
 | `binary_sensor..._bandeira_vermelha_ativa` | Ligado/desligado | — | Ligado quando a bandeira vigente é Vermelha P1 ou P2. | `bandeira`, `adicional_rskwh` |
 | `button..._atualizar_agora` | Botão | — | Força uma atualização imediata do coordinator. | — |
+| `button..._limpar_cache_e_atualizar` | Botão | — | Apaga o cache persistente e força uma busca real (diagnóstico). | — |
+
+Os sensores de preço também expõem `ultimo_erro` (texto curto da última
+falha) e `ultima_atualizacao_sucesso` (instante do último dado real). Se
+houver mais de uma entry da mesma distribuidora, o nome do dispositivo
+recebe o sufixo **(subgrupo • modalidade)** para não ficar duplicado.
 
 Os sensores de preço usam `state_class: measurement` e unidade
 `BRL/kWh`, sem `device_class`, para que o painel de Energia trate o valor

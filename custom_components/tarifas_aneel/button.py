@@ -33,11 +33,34 @@ class AtualizarAgoraButton(AneelBaseEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
+class LimparCacheAtualizarButton(AneelBaseEntity, ButtonEntity):
+    """Remove o cache persistente e força uma busca real (diagnóstico)."""
+
+    _attr_icon = "mdi:database-refresh"
+    _attr_translation_key = "limpar_cache_atualizar"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o botão de limpeza do cache."""
+        super().__init__(coordinator, entry, "limpar_cache_atualizar")
+
+    async def async_press(self) -> None:
+        """Apaga o cache persistente e atualiza imediatamente."""
+        await self.coordinator.async_limpar_cache()
+        await self.coordinator.async_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Cria o botão da entry."""
+    """Cria os botões da entry."""
     coordinator: AneelTarifasCoordinator = entry.runtime_data
-    async_add_entities([AtualizarAgoraButton(coordinator, entry)])
+    async_add_entities(
+        [
+            AtualizarAgoraButton(coordinator, entry),
+            LimparCacheAtualizarButton(coordinator, entry),
+        ]
+    )

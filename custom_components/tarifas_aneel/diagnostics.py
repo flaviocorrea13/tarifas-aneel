@@ -89,6 +89,7 @@ def _diagnosticos_do_coordinator(
         ),
         "ultima_atualizacao_sucesso": _iso(ultima_sucesso),
         "ultima_atualizacao_real": _iso(ultima_real),
+        "ultimo_erro": getattr(coordinator, "ultimo_erro", None),
         "fonte_tarifa": (
             dados.fonte_tarifa.value if dados.fonte_tarifa else None
         ),

@@ -205,6 +205,8 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
         # Timestamp próprio: o HA 2024.10 não expõe
         # ``last_update_success_time`` no coordinator.
         self._ultima_atualizacao_real: datetime | None = None
+        # Último erro de atualização em texto curto (None após recuperar).
+        self._ultimo_erro: str | None = None
         self._store: Store[dict[str, Any]] = Store(
             hass, STORE_VERSION, f"{STORE_KEY}_{entry.entry_id}"
         )
@@ -328,6 +330,14 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
     # Ciclo de atualização
     # ------------------------------------------------------------------
     async def _async_update_data(self) -> DadosAneel:
+        """Executa a busca e mantém o último erro em texto curto."""
+        try:
+            return await self._async_buscar_dados()
+        except Exception as err:
+            self._registrar_erro(err)
+            raise
+
+    async def _async_buscar_dados(self) -> DadosAneel:
         """Busca tarifa e bandeira com fallback independente por item."""
         agora = dt_util.utcnow()
         cache = await self._async_carregar_cache()
@@ -371,6 +381,7 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             fonte_bandeira,
             ultima_real,
         )
+        self._atualizar_ultimo_erro(fonte_tarifa, fonte_bandeira)
         await self._async_gerenciar_repair(dados, agora)
         await self._async_gerenciar_revisao_impostos(dados)
         if teve_dado_real:
@@ -486,6 +497,37 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
         if self.data is not None and self.data.ultima_atualizacao_real is not None:
             return self.data.ultima_atualizacao_real
         return self._ultima_atualizacao_real
+
+    @property
+    def ultimo_erro(self) -> str | None:
+        """Último erro de atualização em texto curto (None se recuperou)."""
+        return self._ultimo_erro
+
+    def _registrar_erro(self, erro: Any) -> None:
+        """Guarda apenas a primeira linha do erro, limitada a 200 chars."""
+        texto = str(erro).strip() or type(erro).__name__
+        self._ultimo_erro = texto.splitlines()[0][:200]
+
+    def _limpar_erro(self) -> None:
+        """Limpa o último erro depois de uma atualização com fonte real."""
+        self._ultimo_erro = None
+
+    def _atualizar_ultimo_erro(
+        self,
+        fonte_tarifa: FonteDado | None,
+        fonte_bandeira: FonteDado | None,
+    ) -> None:
+        """Registra degradação parcial quando um item fica sem fonte real."""
+        fontes_reais = (FonteDado.API, FonteDado.CSV)
+        falhas: list[str] = []
+        if fonte_tarifa not in fontes_reais:
+            falhas.append("tarifa")
+        if fonte_bandeira not in fontes_reais:
+            falhas.append("bandeira")
+        if falhas:
+            self._registrar_erro("Sem fonte real para: " + ", ".join(falhas))
+        else:
+            self._limpar_erro()
 
     # ------------------------------------------------------------------
     # Tarifa (3 camadas)
@@ -693,6 +735,13 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
     # ------------------------------------------------------------------
     # Cache persistente (camada 3)
     # ------------------------------------------------------------------
+    async def async_limpar_cache(self) -> None:
+        """Remove o cache persistente (botão Limpar cache e atualizar)."""
+        await self._store.async_remove()
+        _LOGGER.debug(
+            "Cache persistente removido para %s", self._filtro.distribuidora
+        )
+
     async def _async_carregar_cache(self) -> _CacheDados | None:
         """Carrega e valida o cache persistente do Store."""
         dados = await self._store.async_load()

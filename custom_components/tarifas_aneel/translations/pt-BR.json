@@ -125,6 +125,9 @@
       "ultima_atualizacao_sucesso": {
         "name": "Última atualização com sucesso"
       },
+      "idade_dado": {
+        "name": "Idade do dado"
+      },
       "custo_fixo_mensal": {
         "name": "CIP/COSIP mensal"
       },
@@ -146,6 +149,9 @@
     "button": {
       "atualizar_agora": {
         "name": "Atualizar agora"
+      },
+      "limpar_cache_atualizar": {
+        "name": "Limpar cache e atualizar"
       }
     }
   }

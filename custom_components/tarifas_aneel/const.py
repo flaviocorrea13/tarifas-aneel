@@ -217,6 +217,10 @@ ATTR_ALIQUOTAS_APLICADAS: Final = "aliquotas_aplicadas"
 ATTR_IMPOSTOS_CONFIGURADOS: Final = "impostos_configurados"
 ATTR_ALIQUOTAS_REVISADAS_EM: Final = "aliquotas_revisadas_em"
 ATTR_PIS_COFINS_SEM_ICMS: Final = "pis_cofins_sem_icms"
+# Diagnóstico do coordinator: último erro (texto curto) e instante da
+# última atualização bem-sucedida com dado real (API/CSV).
+ATTR_ULTIMO_ERRO: Final = "ultimo_erro"
+ATTR_ULTIMA_ATUALIZACAO_SUCESSO: Final = "ultima_atualizacao_sucesso"
 ATTR_POSTO_TARIFARIO: Final = "posto_tarifario"
 ATTR_TARIFA_POR_POSTO: Final = "tarifa_por_posto"
 # Atributos do custo estimado por ciclo de leitura.

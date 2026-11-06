@@ -7,6 +7,7 @@ coordinator (``CoordinatorEntity``), ``unique_id`` estável, ``DeviceInfo``,
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -24,6 +25,8 @@ from custom_components.tarifas_aneel.const import (
     ATTR_MODALIDADE,
     ATTR_PIS_COFINS_SEM_ICMS,
     ATTR_SUBGRUPO,
+    ATTR_ULTIMA_ATUALIZACAO_SUCESSO,
+    ATTR_ULTIMO_ERRO,
     CONF_DISTRIBUIDORA,
     CONF_MODALIDADE,
     CONF_SUBGRUPO,
@@ -71,12 +74,46 @@ class AneelBaseEntity(CoordinatorEntity[AneelTarifasCoordinator]):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             manufacturer=DEVICE_MANUFACTURER,
-            name=nome,
+            name=self._nome_dispositivo(nome),
             model=(
                 f"{entry.data.get(CONF_SUBGRUPO, '')} • "
                 f"{entry.data.get(CONF_MODALIDADE, '')}"
             ).strip(" •"),
             configuration_url=ANEEL_BASE_URL,
+        )
+
+    def _nome_dispositivo(self, nome: str) -> str:
+        """Sufixa o dispositivo quando há entries da mesma distribuidora."""
+        sigla = str(self._entry.data.get(CONF_DISTRIBUIDORA, ""))
+        if not self._distribuidora_repetida(sigla):
+            return nome
+        sufixo = " • ".join(
+            parte
+            for parte in (
+                str(self._entry.data.get(CONF_SUBGRUPO, "")).strip(),
+                str(self._entry.data.get(CONF_MODALIDADE, "")).strip(),
+            )
+            if parte
+        )
+        return f"{nome} ({sufixo})" if sufixo else nome
+
+    def _distribuidora_repetida(self, sigla: str) -> bool:
+        """Existe mais de uma config entry com a mesma distribuidora?"""
+        hass = getattr(self.coordinator, "hass", None)
+        config_entries = getattr(hass, "config_entries", None)
+        if config_entries is None:
+            return False
+        try:
+            entries = config_entries.async_entries(DOMAIN)
+        except (AttributeError, TypeError):
+            return False
+        return (
+            sum(
+                1
+                for entrada in entries
+                if entrada.data.get(CONF_DISTRIBUIDORA) == sigla
+            )
+            > 1
         )
 
     @property
@@ -101,6 +138,14 @@ class AneelBaseEntity(CoordinatorEntity[AneelTarifasCoordinator]):
             atributos[ATTR_DATA_COMPETENCIA] = (
                 dados.bandeira.competencia.isoformat()
             )
+        ultima = getattr(self.coordinator, "ultima_atualizacao_real", None)
+        if not isinstance(ultima, datetime):
+            ultima = dados.ultima_atualizacao_real
+        erro = getattr(self.coordinator, "ultimo_erro", None)
+        atributos[ATTR_ULTIMO_ERRO] = str(erro) if erro else None
+        atributos[ATTR_ULTIMA_ATUALIZACAO_SUCESSO] = (
+            ultima.isoformat() if isinstance(ultima, datetime) else None
+        )
         return atributos
 
     def _aliquotas_pct(self) -> dict[str, float]:

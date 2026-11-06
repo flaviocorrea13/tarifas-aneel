@@ -391,6 +391,10 @@ def test_ultima_atualizacao_e_timestamp_de_diagnostico() -> None:
     assert sensor.extra_state_attributes == {
         "fonte_tarifa": "CSV",
         "fonte_bandeira": "API",
+        "ultimo_erro": None,
+        "ultima_atualizacao_sucesso": datetime(
+            2026, 10, 30, 12, 0, tzinfo=UTC
+        ).isoformat(),
     }
 
 
@@ -474,6 +478,7 @@ def test_traducoes_tem_todas_as_entidades() -> None:
         "ultima_atualizacao_sucesso",
         "custo_fixo_mensal",
         "custo_estimado_ciclo",
+        "idade_dado",
     }
     binarios = {
         "dados_desatualizados",

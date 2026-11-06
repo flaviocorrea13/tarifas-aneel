@@ -26,7 +26,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
@@ -57,6 +57,8 @@ from custom_components.tarifas_aneel.const import (
     ATTR_POSTO_TARIFARIO,
     ATTR_RESET_DETECTADO,
     ATTR_TARIFA_POR_POSTO,
+    ATTR_ULTIMA_ATUALIZACAO_SUCESSO,
+    ATTR_ULTIMO_ERRO,
     CONF_MODALIDADE,
     DEFAULT_CIP_COSIP,
     MODALIDADE_BRANCA,
@@ -442,6 +444,7 @@ class UltimaAtualizacaoSensor(AneelBaseEntity, SensorEntity):
         dados = self._dados
         if dados is None:
             return {}
+        erro = getattr(self.coordinator, "ultimo_erro", None)
         return {
             "fonte_tarifa": (
                 dados.fonte_tarifa.value
@@ -453,7 +456,52 @@ class UltimaAtualizacaoSensor(AneelBaseEntity, SensorEntity):
                 if dados.fonte_bandeira is not None
                 else None
             ),
+            ATTR_ULTIMO_ERRO: str(erro) if erro else None,
+            ATTR_ULTIMA_ATUALIZACAO_SUCESSO: (
+                dados.ultima_atualizacao_real.isoformat()
+                if dados.ultima_atualizacao_real is not None
+                else None
+            ),
         }
+
+
+class IdadeDadoSensor(AneelBaseEntity, SensorEntity):
+    """Idade do dado real em dias (diagnóstico).
+
+    Mede quanto tempo passou desde a última atualização real (API/CSV).
+    Sem dado real, fica indisponível: não inventamos uma idade a partir do
+    cache, cuja data de gravação não é a data do dado.
+    """
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.DAYS
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-alert-outline"
+    _attr_translation_key = "idade_dado"
+
+    def __init__(
+        self, coordinator: AneelTarifasCoordinator, entry: ConfigEntry
+    ) -> None:
+        """Inicializa o sensor de idade do dado."""
+        super().__init__(coordinator, entry, "idade_dado")
+
+    @property
+    def native_value(self) -> float | None:
+        """Dias desde a última atualização real (1 casa decimal)."""
+        dados = self._dados
+        if dados is None or dados.ultima_atualizacao_real is None:
+            return None
+        segundos = max(
+            (dt_util.utcnow() - dados.ultima_atualizacao_real).total_seconds(),
+            0.0,
+        )
+        return round(segundos / 86400, 1)
+
+    @property
+    def available(self) -> bool:
+        """Indisponível enquanto nunca houve dado real."""
+        return super().available and self.native_value is not None
 
 
 class AdicionalBandeiraSensor(TarifaSensor):
@@ -887,6 +935,7 @@ async def async_setup_entry(
         FonteDadoTarifaSensor(coordinator, entry),
         FonteDadoBandeiraSensor(coordinator, entry),
         UltimaAtualizacaoSensor(coordinator, entry),
+        IdadeDadoSensor(coordinator, entry),
         CustoFixoMensalSensor(coordinator, entry),
     ]
     if entry.data.get(CONF_MODALIDADE) == MODALIDADE_BRANCA:
