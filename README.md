@@ -563,17 +563,26 @@ Contribuições são bem-vindas:
 4. Rode os testes e o lint:
 
    ```bash
-   pip install homeassistant==2024.10.0 pytest python-dateutil pyyaml
+   # Home Assistant 2024.10 (mínimo) + plugin de testes, no Python 3.12.
+   # O plugin fixa a versão do HA e já instala o pytest.
+   pip install "homeassistant==2024.10.0" \
+     "pytest-homeassistant-custom-component==0.13.171" \
+     python-dateutil
+   pytest tests -q
+
+   # Versão estável (Python 3.14): o plugin sem pin escolhe o HA suportado.
+   pip install pytest-homeassistant-custom-component python-dateutil
    pytest tests -q
 
    pip install ruff
-   ruff check custom_components tests
+   ruff check .
    ```
 
 5. Abra um pull request explicando o que mudou e como validar.
 
-O CI roda ruff, hassfest e a validação do HACS a cada push/PR, além dos
-testes no Python 3.12 com o Home Assistant 2024.10.
+O CI roda ruff, hassfest e a validação do HACS a cada push/PR, além da
+suíte de testes em matriz: Home Assistant 2024.10 (Python 3.12) e a
+versão estável suportada pelo plugin (Python 3.14).
 
 ---
 

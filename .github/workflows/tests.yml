@@ -5,15 +5,45 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pytest:
+    name: pytest (HA ${{ matrix.homeassistant }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Versão mínima suportada (hacs.json). O plugin é o par oficial
+          # dessa versão do Home Assistant e fixa o HA 2024.10.0.
+          - homeassistant: "2024.10.0"
+            python: "3.12"
+            requirements: >-
+              homeassistant==2024.10.0
+              pytest-homeassistant-custom-component==0.13.171
+          # Estável: o plugin sem pin traz o Home Assistant estável que ele
+          # suporta. O HA atual exige Python 3.14.
+          - homeassistant: "stable"
+            python: "3.14"
+            requirements: pytest-homeassistant-custom-component
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Instalar Home Assistant 2024.10 (mínimo da integração) + pytest
-        run: pip install homeassistant==2024.10.0 pytest python-dateutil
+          python-version: ${{ matrix.python }}
+
+      - name: Instalar dependências de teste
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ${{ matrix.requirements }} python-dateutil
+
       - name: Pytest
-        run: pytest tests -q
+        run: python -m pytest tests -q

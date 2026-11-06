@@ -146,13 +146,15 @@ async def test_reconfigure_abre_com_os_dados_atuais(hass) -> None:
     assert padroes[CONF_DETALHE] == "Não se aplica"
 
 
-async def test_reconfigure_iniciado_pela_entry_mostra_formulario(
+async def test_reconfigure_com_dados_iniciais_mostra_formulario(
     hass, monkeypatch
 ) -> None:
-    """O caminho real do HA (``async_start_reconfigure``) abre o formulário.
+    """Dados iniciais da entry não são tratados como submissão.
 
-    O HA 2024.10 entrega os dados da entry como ``user_input`` do primeiro
-    passo; eles não podem ser tratados como uma submissão do usuário.
+    O HA 2024.10 inicia a reconfiguração passando os dados atuais da entry
+    como ``user_input`` do primeiro passo (via ``async_start_reconfigure``).
+    Esse caminho é simulado aqui com ``data=entry.data`` no ``async_init``,
+    que funciona tanto na versão mínima quanto na estável.
     """
     _validacao(monkeypatch, None)
     recarregadas = _sem_reload(monkeypatch, hass)
@@ -160,17 +162,22 @@ async def test_reconfigure_iniciado_pela_entry_mostra_formulario(
     entry = _entry()
     entry.add_to_hass(hass)
 
-    entry.async_start_reconfigure(hass)
-    await hass.async_block_till_done()
+    resultado = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+        data=dict(entry.data),
+    )
 
-    progresso = hass.config_entries.flow.async_progress()
-    assert len(progresso) == 1
-    assert progresso[0]["step_id"] == "reconfigure"
+    assert resultado["type"] is FlowResultType.FORM
+    assert resultado["step_id"] == "reconfigure"
     assert recarregadas == []
 
     novo = {**DADOS_EMS, CONF_MODALIDADE: "Branca"}
     resultado = await hass.config_entries.flow.async_configure(
-        progresso[0]["flow_id"], user_input=novo
+        resultado["flow_id"], user_input=novo
     )
 
     assert resultado["type"] is FlowResultType.ABORT
