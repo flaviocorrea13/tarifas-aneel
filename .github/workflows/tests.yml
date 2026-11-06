@@ -28,6 +28,7 @@ jobs:
             requirements: >-
               homeassistant==2024.10.0
               pytest-homeassistant-custom-component==0.13.171
+              josepy==1.15.0
           # Estável: o plugin sem pin traz o Home Assistant estável que ele
           # suporta. O HA atual exige Python 3.14.
           - homeassistant: "stable"

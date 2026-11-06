@@ -62,6 +62,7 @@ jobs:
           python -m pip install \
             "homeassistant==2024.10.0" \
             "pytest-homeassistant-custom-component==0.13.171" \
+            "josepy==1.15.0" \
             python-dateutil
 
       - name: Pytest

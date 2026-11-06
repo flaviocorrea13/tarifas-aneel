@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-ruff@v3
-      - name: Ruff (lint + isort)
-        run: ruff check .
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check
 
   hassfest:
     runs-on: ubuntu-latest
