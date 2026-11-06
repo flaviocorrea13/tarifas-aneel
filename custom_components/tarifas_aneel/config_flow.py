@@ -11,6 +11,13 @@ acrescentado quando não é o padrão ("Não se aplica") — assim o mesmo
 recorte não gera entries duplicadas, mas uma variante SCEE continua
 possível.
 
+Reconfiguração: ``async_step_reconfigure`` recebe a entry pelo contexto
+do HA (compatível com o 2024.10, que não tem ``_get_reconfigure_entry``),
+valida o novo recorte, atualiza unique_id/título/dados e recarrega a
+entry. Se a combinação já pertencer a outra entry, aborta sem alterar
+nada. As entidades continuam com ``unique_id`` baseado em
+``entry.entry_id``, então trocar o recorte não cria entidades órfãs.
+
 Fluxo de opções: alíquotas de ICMS/PIS/COFINS em % (padrão 0 — o usuário
 deve conferir os valores reais na própria fatura), escolha da base do
 PIS/COFINS (sem ICMS por padrão), CIP/COSIP em R$/mês, intervalo de
@@ -30,7 +37,11 @@ from typing import Any, Final
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.config_entries import ConfigEntry, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlowResult,
+    UnknownEntry,
+)
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
@@ -206,31 +217,63 @@ def _validar_percentuais(
     return None
 
 
-ESQUEMA_CONFIG: Final = vol.Schema(
-    {
-        vol.Required(CONF_DISTRIBUIDORA): selector.SelectSelector(
-            selector.SelectSelectorConfig(
-                options=_opcoes_distribuidora(),
-                mode=selector.SelectSelectorMode.DROPDOWN,
-            )
-        ),
-        vol.Required(CONF_SUBGRUPO, default=DEFAULT_SUBGRUPO): _seletor_lista(
-            SUBGRUPOS
-        ),
-        vol.Required(CONF_CLASSE, default=DEFAULT_CLASSE): _seletor_lista(
-            CLASSES
-        ),
-        vol.Required(
-            CONF_SUBCLASSE, default=DEFAULT_SUBCLASSE
-        ): _seletor_lista(SUBCLASSES),
-        vol.Required(
-            CONF_MODALIDADE, default=MODALIDADE_CONVENCIONAL
-        ): _seletor_lista(MODALIDADES_GRUPO_B),
-        vol.Required(CONF_DETALHE, default=DEFAULT_DETALHE): _seletor_lista(
-            DETALHES
-        ),
-    }
-)
+def _esquema_config(padroes: dict[str, Any] | None = None) -> vol.Schema:
+    """Formulário do recorte, com os valores atuais como padrão.
+
+    O fluxo de usuário usa os padrões globais; a reconfiguração passa os
+    dados da entry para o formulário abrir já preenchido.
+    """
+    padroes = padroes or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_DISTRIBUIDORA,
+                default=padroes.get(CONF_DISTRIBUIDORA, DISTRIBUTORS[0]),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=_opcoes_distribuidora(),
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(
+                CONF_SUBGRUPO,
+                default=padroes.get(CONF_SUBGRUPO, DEFAULT_SUBGRUPO),
+            ): _seletor_lista(SUBGRUPOS),
+            vol.Required(
+                CONF_CLASSE,
+                default=padroes.get(CONF_CLASSE, DEFAULT_CLASSE),
+            ): _seletor_lista(CLASSES),
+            vol.Required(
+                CONF_SUBCLASSE,
+                default=padroes.get(CONF_SUBCLASSE, DEFAULT_SUBCLASSE),
+            ): _seletor_lista(SUBCLASSES),
+            vol.Required(
+                CONF_MODALIDADE,
+                default=padroes.get(
+                    CONF_MODALIDADE, MODALIDADE_CONVENCIONAL
+                ),
+            ): _seletor_lista(MODALIDADES_GRUPO_B),
+            vol.Required(
+                CONF_DETALHE,
+                default=padroes.get(CONF_DETALHE, DEFAULT_DETALHE),
+            ): _seletor_lista(DETALHES),
+        }
+    )
+
+
+ESQUEMA_CONFIG: Final = _esquema_config()
+
+
+def _filtro_do_user_input(user_input: dict[str, Any]) -> TarifaFiltro:
+    """Converte o formulário no recorte usado pela API."""
+    return TarifaFiltro(
+        distribuidora=user_input[CONF_DISTRIBUIDORA],
+        subgrupo=user_input[CONF_SUBGRUPO],
+        modalidade=user_input[CONF_MODALIDADE],
+        classe=user_input[CONF_CLASSE],
+        subclasse=user_input[CONF_SUBCLASSE],
+        detalhe=user_input[CONF_DETALHE],
+    )
 
 
 def _unique_id_da_filtro(filtro: TarifaFiltro) -> str:
@@ -261,22 +304,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     MINOR_VERSION = 1
 
+    # O HA 2024.10 chama o primeiro passo da reconfiguração passando os
+    # dados atuais da entry como ``user_input`` (``async_start_reconfigure``).
+    # Isso não é uma submissão do usuário: o formulário precisa aparecer
+    # primeiro. A flag diferencia o primeiro passo de um envio real.
+    _reconfigure_form_shown = False
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Passo principal: escolha do recorte + validação na ANEEL."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            filtro = TarifaFiltro(
-                distribuidora=user_input[CONF_DISTRIBUIDORA],
-                subgrupo=user_input[CONF_SUBGRUPO],
-                modalidade=user_input[CONF_MODALIDADE],
-                classe=user_input[CONF_CLASSE],
-                subclasse=user_input[CONF_SUBCLASSE],
-                detalhe=user_input[CONF_DETALHE],
-            )
+            filtro = _filtro_do_user_input(user_input)
             await self.async_set_unique_id(_unique_id_da_filtro(filtro))
-            self._abort_if_unique_id_mismatch()
+            self._abort_if_unique_id_configured()
             if (erro := await self._async_validar(filtro)) is None:
                 return self.async_create_entry(
                     title=_titulo_da_filtro(filtro), data=user_input
@@ -284,6 +326,68 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = erro
         return self.async_show_form(
             step_id="user", data_schema=ESQUEMA_CONFIG, errors=errors
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Reconfigura o recorte de uma entry existente.
+
+        No HA 2024.10 a entry chega por ``self.context["entry_id"]`` (não
+        existe ``self._get_reconfigure_entry()``). Ao concluir, atualiza
+        ``unique_id``, título e dados e recarrega a entry; se o novo
+        recorte já pertence a outra entry, aborta sem alterar nada.
+        """
+        entry = self._entry_da_reconfiguracao()
+        errors: dict[str, str] = {}
+        if user_input is not None and not self._reconfigure_form_shown:
+            # Primeiro passo iniciado pela entry: o HA entrega ``entry.data``
+            # como user_input. Mostre o formulário já preenchido em vez de
+            # salvar sem o usuário confirmar.
+            user_input = None
+        if user_input is not None:
+            filtro = _filtro_do_user_input(user_input)
+            novo_unique_id = _unique_id_da_filtro(filtro)
+            if self._recorte_ja_configurado(novo_unique_id, entry.entry_id):
+                return self.async_abort(reason="already_configured")
+            if (erro := await self._async_validar(filtro)) is None:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=novo_unique_id,
+                    title=_titulo_da_filtro(filtro),
+                    data=user_input,
+                    reason="reconfigure_successful",
+                )
+            errors["base"] = erro
+        self._reconfigure_form_shown = True
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_esquema_config(entry.data),
+            errors=errors,
+            description_placeholders={"name": entry.title},
+        )
+
+    @callback
+    def _entry_da_reconfiguracao(self) -> ConfigEntry:
+        """Entry que está sendo reconfigurada (contexto do HA)."""
+        entry_id = self.context.get("entry_id")
+        entry = (
+            self.hass.config_entries.async_get_entry(entry_id)
+            if entry_id
+            else None
+        )
+        if entry is None:
+            raise UnknownEntry(entry_id)
+        return entry
+
+    @callback
+    def _recorte_ja_configurado(
+        self, unique_id: str, entry_id: str
+    ) -> bool:
+        """Outra entry já usa este recorte (ignora a própria entry)."""
+        return any(
+            outra.entry_id != entry_id and outra.unique_id == unique_id
+            for outra in self._async_current_entries(include_ignore=True)
         )
 
     async def _async_validar(self, filtro: TarifaFiltro) -> str | None:

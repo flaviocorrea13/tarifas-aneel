@@ -160,6 +160,11 @@ O recorte é validado no portal da ANEEL antes de criar a integração. Se
 não houver tarifa publicada para a combinação, o formulário avisa e a
 integração não é criada.
 
+Para trocar o recorte de uma integração já criada, use **Reconfigurar**
+(no menu da integração). O novo recorte é validado na ANEEL e a
+integração é recarregada; se a combinação já existir em outra entry, a
+alteração é recusada.
+
 ### 5.2 Opções (options flow)
 
 Depois de criar a integração, abra **Configurações → Dispositivos e

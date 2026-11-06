@@ -20,6 +20,26 @@
           "modalidade": "Tariff modality (Conventional or White — group B).",
           "detalhe": "Pick SCEE only for the reduced energy tariff with distributed generation; the default is \"Not applicable\"."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure tariff slice",
+        "description": "Adjust the tariff slice of this integration. The new slice is validated against ANEEL and the integration is reloaded when you save.",
+        "data": {
+          "distribuidora": "Utility (distribuidora)",
+          "subgrupo": "Sub-group",
+          "classe": "Class",
+          "subclasse": "Sub-class",
+          "modalidade": "Tariff modality",
+          "detalhe": "Detail (SCEE)"
+        },
+        "data_description": {
+          "distribuidora": "Electricity utility (sigla as used by ANEEL).",
+          "subgrupo": "Tariff sub-group from your bill (e.g. B1 residential).",
+          "classe": "Consumer class of the premises.",
+          "subclasse": "Consumer sub-class of the premises.",
+          "modalidade": "Tariff modality (Conventional or White — group B).",
+          "detalhe": "Pick SCEE only for the reduced energy tariff with distributed generation; the default is \"Not applicable\"."
+        }
       }
     },
     "error": {
@@ -27,7 +47,8 @@
       "cannot_connect": "Could not reach the ANEEL servers. Check the connection and try again."
     },
     "abort": {
-      "already_configured": "This tariff slice is already configured."
+      "already_configured": "This tariff slice is already configured.",
+      "reconfigure_successful": "Slice updated. The integration was reloaded."
     }
   },
   "options": {

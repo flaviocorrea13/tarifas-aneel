@@ -20,6 +20,26 @@
           "modalidade": "Modalidade tarifária (Convencional ou Branca — grupo B).",
           "detalhe": "Escolha SCEE apenas para a TE reduzida com geração distribuída; o padrão é \"Não se aplica\"."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigurar recorte tarifário",
+        "description": "Ajuste o recorte tarifário desta integração. O novo recorte é validado na ANEEL e a integração é recarregada ao salvar.",
+        "data": {
+          "distribuidora": "Distribuidora",
+          "subgrupo": "Subgrupo",
+          "classe": "Classe",
+          "subclasse": "Subclasse",
+          "modalidade": "Modalidade tarifária",
+          "detalhe": "Detalhe (SCEE)"
+        },
+        "data_description": {
+          "distribuidora": "Concessionária de energia (sigla usada pela ANEEL).",
+          "subgrupo": "Subgrupo tarifário da fatura (ex.: B1 residencial).",
+          "classe": "Classe de consumo da unidade.",
+          "subclasse": "Subclasse de consumo da unidade.",
+          "modalidade": "Modalidade tarifária (Convencional ou Branca — grupo B).",
+          "detalhe": "Escolha SCEE apenas para a TE reduzida com geração distribuída; o padrão é \"Não se aplica\"."
+        }
       }
     },
     "error": {
@@ -27,7 +47,8 @@
       "cannot_connect": "Não foi possível consultar os servidores da ANEEL. Verifique a conexão e tente novamente."
     },
     "abort": {
-      "already_configured": "Este recorte tarifário já está configurado."
+      "already_configured": "Este recorte tarifário já está configurado.",
+      "reconfigure_successful": "Recorte atualizado. A integração foi recarregada."
     }
   },
   "options": {
