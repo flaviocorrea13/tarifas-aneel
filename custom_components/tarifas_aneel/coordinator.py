@@ -36,6 +36,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
+from inspect import signature
 import logging
 from typing import Any, Final
 
@@ -107,6 +108,13 @@ MINUTOS_EM_UM_DIA: Final = 1440
 # cache. Se a rede estiver fora, não espera o update_interval inteiro:
 # tenta de novo em 5, 15 e 60 minutos.
 BACKOFF_MINUTOS: Final = (5, 15, 60)
+
+# O parâmetro ``config_entry`` só foi adicionado ao DataUpdateCoordinator
+# depois do HA 2024.10 (versão mínima suportada). Detectamos a assinatura
+# para continuar funcionando tanto na versão mínima quanto na atual.
+COORDENADOR_ACEITA_CONFIG_ENTRY: Final = (
+    "config_entry" in signature(DataUpdateCoordinator.__init__).parameters
+)
 
 
 @dataclass
@@ -180,17 +188,23 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
         filtro: TarifaFiltro,
     ) -> None:
         """Inicializa o coordinator com intervalo das opções (mín. 6 h)."""
+        extras: dict[str, Any] = {}
+        if COORDENADOR_ACEITA_CONFIG_ENTRY:
+            extras["config_entry"] = entry
         super().__init__(
             hass,
             _LOGGER,
-            config_entry=entry,
             name=f"Tarifas ANEEL {filtro.distribuidora}",
             update_interval=timedelta(
                 hours=self._intervalo_horas(entry.options)
             ),
+            **extras,
         )
         self._filtro = filtro
         self._entry = entry
+        # Timestamp próprio: o HA 2024.10 não expõe
+        # ``last_update_success_time`` no coordinator.
+        self._ultima_atualizacao_real: datetime | None = None
         self._store: Store[dict[str, Any]] = Store(
             hass, STORE_VERSION, f"{STORE_KEY}_{entry.entry_id}"
         )
@@ -348,6 +362,7 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             if teve_dado_real
             else (cache.ultima_atualizacao_real if cache else None)
         )
+        self._ultima_atualizacao_real = ultima_real
 
         dados = self._montar_dados(
             tarifa,
@@ -402,6 +417,7 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             FonteDado.CACHE,
             cache.ultima_atualizacao_real,
         )
+        self._ultima_atualizacao_real = dados.ultima_atualizacao_real
         await self._async_gerenciar_repair(dados, agora)
         await self._async_gerenciar_revisao_impostos(dados)
         self.async_set_updated_data(dados)
@@ -458,6 +474,18 @@ class AneelTarifasCoordinator(DataUpdateCoordinator[DadosAneel]):
             dados.fonte_tarifa in fontes_reais
             or dados.fonte_bandeira in fontes_reais
         )
+
+    @property
+    def ultima_atualizacao_real(self) -> datetime | None:
+        """Última vez em que dado real (API/CSV) foi publicado.
+
+        Sobrevive ao reload do payload em memória e também ao reinício via
+        cache. É o fallback de diagnóstico quando a versão do HA não tem
+        ``last_update_success_time``.
+        """
+        if self.data is not None and self.data.ultima_atualizacao_real is not None:
+            return self.data.ultima_atualizacao_real
+        return self._ultima_atualizacao_real
 
     # ------------------------------------------------------------------
     # Tarifa (3 camadas)

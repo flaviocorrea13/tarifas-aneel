@@ -335,7 +335,8 @@ Na bandeira, cada camada tenta primeiro o **mês corrente** e, se a ANEEL
 ainda não publicou, o **mês anterior**. Quando isso acontece, o atributo
 `mes_anterior` fica `true`.
 
-O **binary sensor de dados desatualizados** resume a saúde do dado:
+O **binary sensor de dados desatualizados** resume a saúde do dado
+(limite definido por `STALE_DATA_DAYS` em `const.py`, hoje **3 dias**):
 
 - **Desligado**: a última atualização real (API ou CSV) tem até 3 dias.
 - **Ligado**: a última atualização real tem mais de 3 dias, ou nunca
@@ -402,12 +403,11 @@ mode: single
 
 ```yaml
 alias: "Tarifas ANEEL — dados desatualizados"
-description: "Avisa quando a integração ficar 6 horas com dados só de cache."
+description: "Avisa quando a integração ficar 3 dias com dados só de cache."
 trigger:
   - platform: state
     entity_id: binary_sensor.tarifas_aneel_dados_desatualizados
     to: "on"
-    for: "06:00:00"
 action:
   - service: persistent_notification.create
     data:
