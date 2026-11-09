@@ -1,0 +1,665 @@
+# =============================================================================
+# Energia solar — painel novo (somente entidades existentes)
+# =============================================================================
+# Usa apenas:
+#   - sensores "persistidos" do inversor Growatt (ESPHome)
+#   - entidades da integração Tarifas ANEEL (descobertas por sufixo)
+#   - cards nativos do painel de Energia do HA
+#   - sun.sun
+#
+# NÃO referencia mais: sensor.energisa_referencia,
+# sensor.energia_solar_relatorios, sensor.valor_da_geracao_solar_hoje,
+# sensor.geracao_solar_ciclo, sensor.valor_da_geracao_solar_no_ciclo,
+# sensor.conta_minima_estimada.
+#
+# A economia é CALCULADA no template: kWh gerados x tarifa final da ANEEL.
+# É estimativa, não o valor da fatura.
+#
+# Pré-requisitos
+#   - Integração Tarifas ANEEL configurada (uma entry por recorte).
+#   - Painel de Energia do HA com a geração solar cadastrada.
+#
+# Instalação
+#   - Modo YAML: salve como <config>/dashboard/energia-solar.yaml e registre
+#     em configuration.yaml:
+#       lovelace:
+#         dashboards:
+#           energia-solar:
+#             mode: yaml
+#             title: Energia solar
+#             icon: mdi:solar-power
+#             show_in_sidebar: true
+#             filename: dashboard/energia-solar.yaml
+#   - Modo storage: cole no editor de código do dashboard (sem a chave
+#     "title" externa, se o editor já estiver no nível do dashboard).
+# =============================================================================
+
+title: Energia solar
+views:
+  # ===========================================================================
+  # 1. Resumo
+  # ===========================================================================
+  - title: Resumo
+    path: energia-resumo
+    icon: mdi:view-dashboard
+    type: sections
+    max_columns: 3
+    theme: visionos
+    badges:
+      - type: entity
+        entity: sensor.potencia_ac_persistida
+        color: amber
+        show_name: false
+      - type: entity
+        entity: binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor
+        color: green
+        show_name: false
+      - type: entity
+        entity: sensor.geracao_hoje_persistida
+        color: green
+        show_name: false
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Agora
+            icon: mdi:solar-power
+          - type: gauge
+            name: Potência AC
+            entity: sensor.potencia_ac_persistida
+            unit: W
+            min: 0
+            max: 5000
+            needle: true
+            severity:
+              green: 0
+              yellow: 4000
+              red: 4750
+            segments:
+              - from: 0
+                color: '#43a047'
+              - from: 4000
+                color: '#ffa600'
+              - from: 4750
+                color: '#db4437'
+          - type: tile
+            name: Status
+            entity: sensor.status_inversor_persistido
+            icon: mdi:solar-power
+            color: teal
+          - type: tile
+            name: Comunicação
+            entity: binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor
+            icon: mdi:wifi
+            color: green
+          - type: tile
+            name: Eficiência
+            entity: sensor.eficiencia_persistida
+            icon: mdi:percent-circle-outline
+            color: green
+            features:
+              - type: trend-graph
+          - type: tile
+            name: Limitação
+            entity: sensor.limitacao_persistida
+            icon: mdi:speedometer-slow
+            color: amber
+          - type: conditional
+            conditions:
+              - condition: template
+                value_template: >-
+                  {{ (is_state('sun.sun', 'above_horizon') and
+                  is_state('binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor', 'off'))
+                  or states('sensor.limitacao_persistida') not in ['Sem limitação', 'unavailable', 'unknown', '0', '']
+                  or (states('sensor.codigo_falha_persistido') | int(0)) > 0
+                  or (states('sensor.codigo_aviso_persistido') | int(0)) > 0 }}
+            card:
+              type: markdown
+              content: |
+                ## ⚠️ Alertas ativos
+
+                {% if is_state('binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor', 'off') and is_state('sun.sun', 'above_horizon') -%}
+                📡 **Sem leitura válida do inversor** nos últimos 2 minutos.
+                {% endif -%}
+
+                {% if states('sensor.limitacao_persistida') not in ['Sem limitação', 'unavailable', 'unknown', '0', ''] -%}
+                🔻 **Inversor limitando a potência:** {{ states('sensor.limitacao_persistida') }}
+                {% endif -%}
+
+                {% if states('sensor.codigo_falha_persistido') | int(0) > 0 -%}
+                🛑 **Código de falha:** {{ states('sensor.codigo_falha_persistido') }}
+                {% endif -%}
+
+                {% if states('sensor.codigo_aviso_persistido') | int(0) > 0 -%}
+                ⚠️ **Código de aviso:** {{ states('sensor.codigo_aviso_persistido') }}
+                {% endif -%}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Geração
+            icon: mdi:lightning-bolt
+          - type: tile
+            name: Hoje
+            entity: sensor.geracao_hoje_persistida
+            icon: mdi:white-balance-sunny
+            color: amber
+            features:
+              - type: trend-graph
+          - type: tile
+            name: Total acumulado
+            entity: sensor.geracao_total_persistida
+            icon: mdi:counter
+            color: green
+          - type: tile
+            name: Energia integrada
+            entity: sensor.energia_integrada_persistida
+            icon: mdi:sigma
+            color: blue
+          - type: statistics-graph
+            title: Geração por dia (30 dias)
+            chart_type: bar
+            period: day
+            days_to_show: 30
+            stat_types:
+              - change
+            entities:
+              - entity: sensor.geracao_total_persistida
+                name: kWh/dia
+          - type: statistics-graph
+            title: Geração por mês (12 meses)
+            chart_type: bar
+            period: month
+            days_to_show: 365
+            stat_types:
+              - change
+            entities:
+              - entity: sensor.geracao_total_persistida
+                name: kWh/mês
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Economia estimada
+            icon: mdi:currency-brl
+          - type: markdown
+            content: |
+              {%- set e = integration_entities('tarifas_aneel') -%}
+              {%- set f = e | select('match', '.*_tarifa_final$') | list | first | default('') -%}
+              {%- set b = e | select('match', '.*_bandeira_tarifaria$') | list | first | default('') -%}
+              {%- if not f or not has_value(f) -%}
+              ⏳ Aguardando a tarifa da integração Tarifas ANEEL.
+              {%- else -%}
+              {%- set tarifa = states(f) | float(0) -%}
+              {%- set hoje = states('sensor.geracao_hoje_persistida') | float(0) -%}
+              {%- set total = states('sensor.geracao_total_persistida') | float(0) -%}
+              {%- set bn = states(b) if b and has_value(b) else '—' -%}
+              {%- set icone = '🟢' if 'verde' in bn | lower else '🟡' if 'amarela' in bn | lower else '🔴' if 'vermelha' in bn | lower else '🟣' if 'escassez' in bn | lower else '⚪' -%}
+              ### R$ {{ '%.2f' | format(hoje * tarifa) | replace('.', ',') }} hoje
+
+              **{{ '%.2f' | format(hoje) | replace('.', ',') }} kWh** × R$ {{ '%.4f' | format(tarifa) | replace('.', ',') }}/kWh
+
+              ### R$ {{ '%.2f' | format(total * tarifa) | replace('.', ',') }} acumulado
+
+              **{{ '%.0f' | format(total) | replace('.', ',') }} kWh** desde o início do medidor
+
+              {{ icone }} Bandeira **{{ bn }}** · tarifa final com impostos
+
+              *Estimativa de energia evitada. Não é o valor da fatura: créditos, disponibilidade e encargos não entram na conta.*
+              {%- endif -%}
+          - type: markdown
+            content: |
+              {%- set e = integration_entities('tarifas_aneel') -%}
+              {%- set f = e | select('match', '.*_tarifa_final$') | list | first | default('') -%}
+              {%- set cip = (e | select('match', '.*_(cip_cosip_mensal|custo_fixo_mensal)$') | list | first) | default('') -%}
+              {%- set ciclo = (e | select('match', '.*_(custo_estimado_no_ciclo|custo_estimado_ciclo)$') | list | first) | default('') -%}
+              {%- if not f or not has_value(f) -%}
+              —
+              {%- else -%}
+              {%- set tarifa = states(f) | float(0) -%}
+              {%- set disp = 30 -%}
+              {%- set cipv = (states(cip) | float(0)) if cip and has_value(cip) else 0 -%}
+              **Conta mínima estimada:** R$ {{ '%.2f' | format(disp * tarifa + cipv) | replace('.', ',') }}
+              *{{ disp }} kWh de disponibilidade × tarifa{% if cipv > 0 %} + CIP/COSIP{% endif %}*
+
+              {% if ciclo and has_value(ciclo) -%}
+              **Custo estimado no ciclo:** R$ {{ '%.2f' | format(states(ciclo) | float(0)) | replace('.', ',') }}
+              {%- endif %}
+              {%- endif -%}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Período (painel de Energia)
+            icon: mdi:calendar-range
+          - type: energy-date-selection
+          - type: energy-sources-table
+            types:
+              - solar
+          - type: energy-solar-graph
+            title: Geração no período selecionado
+
+  # ===========================================================================
+  # 2. Inversor
+  # ===========================================================================
+  - title: Inversor
+    path: energia-inversor
+    icon: mdi:solar-power-variant
+    type: sections
+    max_columns: 2
+    theme: visionos
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Telemetria ao vivo
+            icon: mdi:access-point
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor
+                state: 'on'
+            card:
+              type: entities
+              title: Growatt
+              entities:
+                - entity: sensor.potencia_ac_persistida
+                  name: Potência ativa
+                - entity: sensor.potencia_dc_persistida
+                  name: Potência DC
+                - entity: sensor.tensao_rede_persistida
+                  name: Tensão da rede
+                - entity: sensor.frequencia_persistida
+                  name: Frequência
+                - entity: sensor.corrente_rede_persistida
+                  name: Corrente AC
+                - entity: sensor.potencia_aparente_persistida
+                  name: Potência aparente
+                - entity: sensor.potencia_de_saida_persistida
+                  name: Potência de saída (% nominal)
+                - entity: sensor.temperatura_inversor_persistida
+                  name: Temperatura do inversor
+          - type: conditional
+            conditions:
+              - condition: state
+                entity: binary_sensor.energia_shinewifi_x_growatt_comunicacao_inversor
+                state: 'off'
+            card:
+              type: markdown
+              content: |
+                **Inversor sem telemetria ao vivo.** Esperado após o pôr do sol. Os valores de geração mostram a última leitura válida e o histórico continua no HA.
+          - type: history-graph
+            title: Potência — últimas 24 h
+            hours_to_show: 24
+            entities:
+              - entity: sensor.potencia_ac_persistida
+                name: AC
+              - entity: sensor.potencia_dc_persistida
+                name: DC
+          - type: history-graph
+            title: Temperatura — últimas 24 h
+            hours_to_show: 24
+            entities:
+              - entity: sensor.temperatura_inversor_persistida
+                name: Inversor
+              - entity: sensor.temperatura_ipm_persistida
+                name: IPM
+              - entity: sensor.temperatura_boost_persistida
+                name: Boost
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Strings (painéis)
+            icon: mdi:solar-panel-large
+          - type: gauge
+            name: PV1 potência
+            entity: sensor.pv1_potencia_persistida
+            unit: W
+            min: 0
+            max: 3000
+            needle: true
+            severity:
+              green: 0
+              yellow: 2500
+              red: 2850
+          - type: gauge
+            name: PV2 potência
+            entity: sensor.pv2_potencia_persistida
+            unit: W
+            min: 0
+            max: 3000
+            needle: true
+            severity:
+              green: 0
+              yellow: 2500
+              red: 2850
+          - type: tile
+            name: Desbalanço PV1 × PV2
+            entity: sensor.desbalanco_pv_persistido
+            icon: mdi:scale-unbalanced
+            color: grey
+          - type: entities
+            title: PV1
+            icon: mdi:solar-panel
+            entities:
+              - entity: sensor.pv1_tensao_persistida
+                name: Tensão
+                icon: mdi:flash
+              - entity: sensor.pv1_corrente_persistida
+                name: Corrente
+                icon: mdi:current-dc
+              - entity: sensor.pv1_potencia_persistida
+                name: Potência
+                icon: mdi:lightning-bolt
+              - entity: sensor.pv1_geracao_hoje_persistida
+                name: Geração hoje
+                icon: mdi:white-balance-sunny
+              - entity: sensor.pv1_geracao_total_persistida
+                name: Geração total
+                icon: mdi:counter
+          - type: entities
+            title: PV2
+            icon: mdi:solar-panel
+            entities:
+              - entity: sensor.pv2_tensao_persistida
+                name: Tensão
+                icon: mdi:flash
+              - entity: sensor.pv2_corrente_persistida
+                name: Corrente
+                icon: mdi:current-dc
+              - entity: sensor.pv2_potencia_persistida
+                name: Potência
+                icon: mdi:lightning-bolt
+              - entity: sensor.pv2_geracao_hoje_persistida
+                name: Geração hoje
+                icon: mdi:white-balance-sunny
+              - entity: sensor.pv2_geracao_total_persistida
+                name: Geração total
+                icon: mdi:counter
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Rede elétrica
+            icon: mdi:transmission-tower
+          - type: gauge
+            name: Tensão da rede
+            entity: sensor.tensao_rede_persistida
+            unit: V
+            min: 190
+            max: 250
+            needle: true
+            segments:
+              - from: 190
+                color: '#db4437'
+              - from: 202
+                color: '#43a047'
+              - from: 231
+                color: '#ffa600'
+              - from: 240
+                color: '#db4437'
+          - type: gauge
+            name: Frequência
+            entity: sensor.frequencia_persistida
+            unit: Hz
+            min: 59
+            max: 61
+            needle: true
+            segments:
+              - from: 59
+                color: '#db4437'
+              - from: 59.5
+                color: '#ffa600'
+              - from: 59.8
+                color: '#43a047'
+              - from: 60.2
+                color: '#ffa600'
+              - from: 60.5
+                color: '#db4437'
+          - type: history-graph
+            title: Tensão da rede (24 h)
+            hours_to_show: 24
+            entities:
+              - entity: sensor.tensao_rede_persistida
+                name: Tensão
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Saúde do sistema
+            icon: mdi:heart-pulse
+          - type: gauge
+            name: Temperatura do inversor
+            entity: sensor.temperatura_inversor_persistida
+            unit: °C
+            min: 0
+            max: 110
+            needle: true
+            severity:
+              green: 0
+              yellow: 70
+              red: 90
+          - type: entities
+            title: Diagnóstico
+            icon: mdi:stethoscope
+            entities:
+              - entity: sensor.temperatura_ipm_persistida
+                name: Temp. IPM
+                icon: mdi:thermometer
+              - entity: sensor.temperatura_boost_persistida
+                name: Temp. Boost
+                icon: mdi:thermometer-plus
+              - entity: sensor.resistencia_isolamento_persistida
+                name: Resistência de isolamento
+                icon: mdi:omega
+              - entity: sensor.horas_operacao_persistidas
+                name: Horas de operação
+                icon: mdi:clock-outline
+              - entity: sensor.codigo_falha_persistido
+                name: Código de falha
+                icon: mdi:alert-octagon
+              - entity: sensor.codigo_aviso_persistido
+                name: Código de aviso
+                icon: mdi:alert
+          - type: entities
+            title: ESPHome
+            icon: mdi:chip
+            entities:
+              - entity: sensor.shinewifi_x_growatt_wi_fi_signal
+                name: Sinal Wi-Fi
+                icon: mdi:wifi
+              - entity: sensor.shinewifi_x_growatt_uptime
+                name: Uptime
+                icon: mdi:timer-outline
+              - entity: sensor.shinewifi_x_growatt_ip_address
+                name: Endereço IP
+                icon: mdi:ip-network
+
+  # ===========================================================================
+  # 3. Energia (painel de Energia do HA)
+  # ===========================================================================
+  - title: Energia
+    path: energia-painel
+    icon: mdi:lightning-bolt-circle
+    type: sections
+    max_columns: 2
+    theme: visionos
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Solar no período
+            icon: mdi:white-balance-sunny
+          - type: energy-date-selection
+          - type: energy-solar-graph
+            title: Geração solar
+          - type: energy-sources-table
+            types:
+              - solar
+      - type: grid
+        cards:
+          - type: heading
+            heading: Consumo por dispositivo
+            icon: mdi:server
+          - type: energy-devices-graph
+            title: Consumo no período
+          - type: markdown
+            content: |
+              **Tapo P110** · Proxmox<br>
+              **Tomada do servidor** · notebook com Home Assistant, câmeras e DVR<br>
+              O valor do calendário é energia acumulada no período, em kWh. A captura de hoje cresce até o fim do dia.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Detalhe do período
+            icon: mdi:chart-timeline-variant
+          - type: energy-devices-detail-graph
+            title: Consumo ao longo do tempo
+          - type: markdown
+            content: |
+              Se um medidor estiver dentro do outro, somar as barras conta parte do consumo duas vezes. O painel não transforma kWh em custo exato da fatura.
+      - type: grid
+        cards:
+          - type: heading
+            heading: Estatísticas
+            icon: mdi:chart-bar
+          - type: statistics-graph
+            title: Geração diária (30 dias)
+            chart_type: bar
+            period: day
+            days_to_show: 30
+            stat_types:
+              - change
+            entities:
+              - entity: sensor.geracao_total_persistida
+                name: kWh/dia
+          - type: statistics-graph
+            title: Geração mensal (12 meses)
+            chart_type: bar
+            period: month
+            days_to_show: 365
+            stat_types:
+              - change
+            entities:
+              - entity: sensor.geracao_total_persistida
+                name: kWh/mês
+  # ===========================================================================
+  # 4. Tarifas (integração Tarifas ANEEL)
+  # ===========================================================================
+  - title: Tarifas
+    path: energia-tarifas
+    icon: mdi:currency-brl
+    type: sections
+    max_columns: 2
+    theme: visionos
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Tarifa vigente
+            icon: mdi:cash
+          - type: markdown
+            content: |
+              {%- set e = integration_entities('tarifas_aneel') -%}
+              {%- set f = e | select('match', '.*_tarifa_final$') | list | first | default('') -%}
+              {%- set b = e | select('match', '.*_bandeira_tarifaria$') | list | first | default('') -%}
+              {%- set ad = e | select('match', '.*_adicional_de_bandeira$') | list | first | default('') -%}
+              {%- set te = e | select('match', '.*_te$') | list | first | default('') -%}
+              {%- set tusd = e | select('match', '.*_tusd$') | list | first | default('') -%}
+              {%- set fim = e | select('match', '.*_fim_da_vigencia$') | list | first | default('') -%}
+              {%- if not f or not has_value(f) -%}
+              ⏳ Aguardando os dados da integração de tarifas.
+              {%- else -%}
+              {%- set tarifa = states(f) | float(0) -%}
+              {%- set adic = (states(ad) | float(0)) if ad and has_value(ad) else 0 -%}
+              {%- set bn = states(b) if b and has_value(b) else '—' -%}
+              {%- set icone = '🟢' if 'verde' in bn | lower else '🟡' if 'amarela' in bn | lower else '🔴' if 'vermelha' in bn | lower else '🟣' if 'escassez' in bn | lower else '⚪' -%}
+              ## R$ {{ '%.4f' | format(tarifa) | replace('.', ',') }} por kWh
+
+              *Tarifa final, com bandeira e impostos*
+
+              {{ icone }} **Bandeira {{ bn }}**{% if adic > 0 %} · adicional de R$ {{ '%.5f' | format(adic) | replace('.', ',') }}/kWh{% else %} · sem adicional{% endif %}
+
+              {% if te and tusd and has_value(te) and has_value(tusd) %}
+              ⚡ TE R$ {{ '%.5f' | format(states(te) | float(0)) | replace('.', ',') }} · 🔌 TUSD R$ {{ '%.5f' | format(states(tusd) | float(0)) | replace('.', ',') }}
+
+              {% endif %}
+              {% if fim and has_value(fim) %}
+              📅 Vigente até **{{ as_datetime(states(fim)).strftime('%d/%m/%Y') }}** ({{ (as_datetime(states(fim)).date() - now().date()).days }} dias)
+
+              {% endif %}
+              {% set posto = state_attr(f, 'posto_tarifario') %}
+              {% if posto %}
+              ⏰ Posto tarifário: **{{ posto }}**
+
+              {% endif -%}
+              {%- endif -%}
+          - type: markdown
+            title: Impostos aplicados
+            content: |
+              {%- set e = integration_entities('tarifas_aneel') -%}
+              {%- set f = e | select('match', '.*_tarifa_final$') | list | first | default('') -%}
+              {%- if not f or not has_value(f) -%}
+              —
+              {%- else -%}
+              {%- set aliq = state_attr(f, 'aliquotas_aplicadas') or {} -%}
+              {%- set configurados = state_attr(f, 'impostos_configurados') -%}
+              | Tributo | Alíquota |
+              |---|---:|
+              | ICMS | {{ '%.2f' | format(aliq.icms | default(0) | float(0)) | replace('.', ',') }}% |
+              | PIS | {{ '%.2f' | format(aliq.pis | default(0) | float(0)) | replace('.', ',') }}% |
+              | COFINS | {{ '%.2f' | format(aliq.cofins | default(0) | float(0)) | replace('.', ',') }}% |
+
+              {% if not configurados -%}
+              ⚠️ **Alíquotas em 0%.** O preço acima é sem impostos. Configure ICMS, PIS e COFINS nas opções da integração.
+              {% endif -%}
+
+              {% if not (state_attr(f, 'pis_cofins_sem_icms') | default(true)) -%}
+              ℹ️ PIS/COFINS calculados sobre a base **com** ICMS (fórmula antiga).
+              {% endif -%}
+
+              {%- set revisadas = state_attr(f, 'aliquotas_revisadas_em') -%}
+              {% if revisadas -%}
+              *Revisadas em {{ as_datetime(revisadas).strftime('%d/%m/%Y') }}.*
+              {% endif -%}
+              {%- endif -%}
+
+      - type: grid
+        cards:
+          - type: heading
+            heading: Diagnóstico dos dados
+            icon: mdi:database-check
+          - type: markdown
+            content: |
+              {%- set e = integration_entities('tarifas_aneel') -%}
+              {%- set f = e | select('match', '.*_tarifa_final$') | list | first | default('') -%}
+              {%- set api = e | select('match', '.*_status_da_api$') | list | first | default('') -%}
+              {%- set old = e | select('match', '.*_dados_desatualizados$') | list | first | default('') -%}
+              {%- if not f -%}
+              Integração Tarifas ANEEL não encontrada.
+              {%- else -%}
+              {%- set fonte = state_attr(f, 'fonte_dado') -%}
+              {%- set ultima = state_attr(f, 'ultima_atualizacao_sucesso') -%}
+              {%- set erro = state_attr(f, 'ultimo_erro') -%}
+              {%- set comp = state_attr(f, 'data_competencia') -%}
+              {%- set emoji_fonte = '🌐' if fonte == 'API' else '📄' if fonte == 'CSV' else '💾' if fonte == 'Cache' else '❔' -%}
+              | Item | Situação |
+              |---|---|
+              | Fonte da tarifa | {{ emoji_fonte }} {{ fonte | default('—') }} |
+              | Última atualização real | {% if ultima %}{{ as_datetime(ultima).strftime('%d/%m/%Y %H:%M') }}{% else %}—{% endif %} |
+              | Competência da bandeira | {% if comp %}{{ as_datetime(comp).strftime('%m/%Y') }}{% else %}—{% endif %} |
+              | Status da API | {% if api and has_value(api) %}{{ '🟢 no ar' if is_state(api, 'on') else '🔴 fora do ar' }}{% else %}—{% endif %} |
+              | Dados desatualizados | {% if old and has_value(old) %}{{ '⚠️ sim' if is_state(old, 'on') else '✅ não' }}{% else %}—{% endif %} |
+
+              {% if erro -%}
+              **Último erro:** `{{ erro }}`
+              {% endif -%}
+              {%- endif -%}
+          - type: markdown
+            title: Como os valores são calculados
+            content: |
+              - **Tarifa final** = (TUSD + TE + bandeira) com ICMS, PIS e COFINS aplicados "por dentro".
+              - **Economia estimada** = kWh gerados × tarifa final. É uma referência de energia evitada, não a fatura.
+              - **Conta mínima** = 30 kWh de disponibilidade × tarifa + CIP/COSIP. Ajuste o valor `disp = 30` no template para 50 (bifásico) ou 100 (trifásico).
+              - **Custo estimado no ciclo** só aparece se você configurou um sensor de consumo nas opções da integração.
